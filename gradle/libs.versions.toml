@@ -1,0 +1,53 @@
+# Version catalog — the single source of truth for dependency and plugin versions.
+# Modules reference these via the generated `libs` accessor; the buildSrc
+# convention plugin imports this same file so versions never drift.
+
+[versions]
+# Pinned toolchain language level for every module (see jediscore.java-conventions).
+java = "21"
+
+slf4j = "2.0.16"
+logback = "1.5.12"
+netty = "4.1.115.Final"
+micrometer = "1.13.6"
+junit = "5.11.3"
+assertj = "3.26.3"
+testcontainers = "1.20.4"
+jqwik = "1.9.1"
+
+# Plugin versions
+jmhPlugin = "0.7.3"
+foojay = "0.9.0"
+
+[libraries]
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+# Netty is split into the minimal artifacts the network layer actually needs;
+# we avoid the fat `netty-all` to keep the runtime classpath lean.
+netty-buffer = { module = "io.netty:netty-buffer", version.ref = "netty" }
+netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
+netty-codec = { module = "io.netty:netty-codec", version.ref = "netty" }
+netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+
+micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
+micrometer-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
+
+# JUnit version is governed by the BOM; the jupiter artifact intentionally omits a version.
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+
+jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
+
+[bundles]
+netty = ["netty-buffer", "netty-transport", "netty-codec", "netty-handler"]
+micrometer = ["micrometer-core", "micrometer-prometheus"]
+
+[plugins]
+jmh = { id = "me.champeau.jmh", version.ref = "jmhPlugin" }
+foojay-resolver = { id = "org.gradle.toolchains.foojay-resolver-convention", version.ref = "foojay" }

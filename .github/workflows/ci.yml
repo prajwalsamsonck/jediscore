@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test & benchmark smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pins the JDK that runs Gradle to the same major version as the project
+      # toolchain (21), so no toolchain download is needed in CI.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Handles Gradle distribution + dependency caching automatically.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and run all tests
+        run: ./gradlew build --stacktrace --no-daemon
+
+      - name: Benchmark smoke (JMH, fast profile)
+        run: ./gradlew :jediscore-benchmarks:jmh --stacktrace --no-daemon
+
+      - name: Upload test & benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            **/build/reports/
+            **/build/results/jmh/
+          if-no-files-found: ignore

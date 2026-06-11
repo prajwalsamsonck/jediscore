@@ -1,0 +1,17 @@
+# Normalize line endings: text files are stored as LF in the repository and
+# checked out with the platform's native endings disabled (LF everywhere) for
+# reproducible builds and clean diffs across Windows/macOS/Linux.
+* text=auto eol=lf
+
+# Scripts that must stay LF regardless of platform.
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Windows batch scripts must be CRLF to run correctly.
+*.bat text eol=crlf
+
+# Binary artifacts: never normalize.
+gradle-wrapper.jar binary
+*.jar binary
+*.rdb binary
+*.aof binary

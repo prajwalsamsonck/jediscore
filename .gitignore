@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.code-workspace
+.settings/
+.project
+.classpath
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent / editor tooling (machine-specific, not part of the project)
+.claude/
+
+# Logs / runtime artifacts
+*.log
+*.hprof
+/data/
+*.rdb
+*.aof
