@@ -12,7 +12,7 @@ package dev.jediscore.datastructures;
  * <p>All instances are confined to the single command thread, so no field here
  * is synchronised.
  */
-public sealed abstract class RedisValue permits StringValue, HashValue, ListValue, SetValue {
+public sealed abstract class RedisValue permits StringValue, HashValue, ListValue, SetValue, ZSetValue {
 
     private long lastAccessMillis = System.currentTimeMillis();
 

@@ -54,6 +54,20 @@ public final class ServerContext {
         return databases.length;
     }
 
+    /**
+     * Swaps the contents of two databases (for {@code SWAPDB}). Connections hold a
+     * database <em>index</em>, not a reference, so after the swap every client
+     * observing index {@code a} transparently sees what was at index {@code b}.
+     *
+     * @param a the first database index
+     * @param b the second database index
+     */
+    public void swapDatabases(int a, int b) {
+        Database tmp = databases[a];
+        databases[a] = databases[b];
+        databases[b] = tmp;
+    }
+
     /** @return the configuration */
     public ServerConfig config() {
         return config;

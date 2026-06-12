@@ -5,6 +5,7 @@ import dev.jediscore.datastructures.ListValue;
 import dev.jediscore.datastructures.RedisValue;
 import dev.jediscore.datastructures.SetValue;
 import dev.jediscore.datastructures.StringValue;
+import dev.jediscore.datastructures.ZSetValue;
 import dev.jediscore.engine.CommandContext;
 import dev.jediscore.engine.CommandException;
 import java.math.BigDecimal;
@@ -98,6 +99,63 @@ final class Keyspaces {
         return new ListValue(
                 ctx.server().config().listMaxListpackSize(),
                 ctx.server().config().listMaxListpackValue());
+    }
+
+    /**
+     * Returns the value as a {@link ZSetValue}, or throws {@code WRONGTYPE}.
+     *
+     * @param value the value (may be {@code null})
+     * @return the sorted set value, or {@code null} if {@code value} was {@code null}
+     */
+    static ZSetValue asZSet(RedisValue value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof ZSetValue z) {
+            return z;
+        }
+        throw CommandException.wrongType();
+    }
+
+    /** @return a new, config-sized sorted set value */
+    static ZSetValue newZSet(CommandContext ctx) {
+        return new ZSetValue(
+                ctx.server().config().zsetMaxListpackEntries(),
+                ctx.server().config().zsetMaxListpackValue());
+    }
+
+    /**
+     * Parses a sorted-set score: like {@link #parseDouble} but rejects NaN (Redis
+     * scores may be {@code +inf}/{@code -inf} but never NaN).
+     *
+     * @param bytes the bytes
+     * @return the score
+     * @throws CommandException {@code ERR value is not a valid float}
+     */
+    static double parseScore(byte[] bytes) {
+        double d = parseDouble(bytes);
+        if (Double.isNaN(d)) {
+            throw CommandException.notFloat();
+        }
+        return d;
+    }
+
+    /**
+     * Formats a sorted-set score the way Redis replies: {@code inf}/{@code -inf}
+     * for infinities, an integer with no decimal point when the value is integral,
+     * and otherwise the shortest round-tripping representation.
+     *
+     * @param score the score
+     * @return the formatted score
+     */
+    static String formatScore(double score) {
+        if (Double.isInfinite(score)) {
+            return score > 0 ? "inf" : "-inf";
+        }
+        if (score == Math.rint(score) && Math.abs(score) < 1e17) {
+            return Long.toString((long) score);
+        }
+        return Double.toString(score);
     }
 
     /** @return a new, config-sized set value */

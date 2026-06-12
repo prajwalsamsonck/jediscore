@@ -130,6 +130,9 @@ class RedisDifferentialTest {
         // the happy path and the matching error paths on both servers.
         Arbitrary<String> values = Arbitraries.of("0", "1", "5", "-3", "42", "hello", "");
         Arbitrary<String> indices = Arbitraries.of("-2", "-1", "0", "1", "2", "3");
+        Arbitrary<String> scores = Arbitraries.of("0", "1", "2", "-1", "3", "hello");
+        Arbitrary<String> members = Arbitraries.of("m0", "m1", "m2");
+        Arbitrary<String> bounds = Arbitraries.of("-inf", "+inf", "0", "1", "2", "3", "(1", "(2");
 
         Arbitrary<String[]> command = Arbitraries.oneOf(List.of(
                 // strings
@@ -170,7 +173,20 @@ class RedisDifferentialTest {
                 keys.map(k -> new String[] {"SMEMBERS", k}),
                 Combinators.combine(keys, keys).as((a, b) -> new String[] {"SUNION", a, b}),
                 Combinators.combine(keys, keys).as((a, b) -> new String[] {"SINTER", a, b}),
-                Combinators.combine(keys, keys).as((a, b) -> new String[] {"SDIFF", a, b})));
+                Combinators.combine(keys, keys).as((a, b) -> new String[] {"SDIFF", a, b}),
+                // sorted sets (replies are order-deterministic, compared directly)
+                Combinators.combine(keys, scores, members).as((k, s, m) -> new String[] {"ZADD", k, s, m}),
+                Combinators.combine(keys, members).as((k, m) -> new String[] {"ZSCORE", k, m}),
+                Combinators.combine(keys, members).as((k, m) -> new String[] {"ZREM", k, m}),
+                keys.map(k -> new String[] {"ZCARD", k}),
+                Combinators.combine(keys, members).as((k, m) -> new String[] {"ZRANK", k, m}),
+                Combinators.combine(keys, scores, members).as((k, s, m) -> new String[] {"ZINCRBY", k, s, m}),
+                Combinators.combine(keys, bounds, bounds).as((k, lo, hi) -> new String[] {"ZCOUNT", k, lo, hi}),
+                Combinators.combine(keys, indices, indices).as((k, s, e) -> new String[] {"ZRANGE", k, s, e}),
+                Combinators.combine(keys, bounds, bounds).as((k, lo, hi) -> new String[] {"ZRANGEBYSCORE", k, lo, hi}),
+                // expiration (replies are deterministic; future TTL doesn't perturb other commands)
+                keys.map(k -> new String[] {"EXPIRE", k, "100"}),
+                keys.map(k -> new String[] {"PERSIST", k})));
 
         return command.list().ofMinSize(1).ofMaxSize(30);
     }

@@ -48,7 +48,118 @@ public final class GenericCommands {
         registry.register(CommandSpec.of("touch", -2, GenericCommands::touch));
         registry.register(CommandSpec.of("copy", -3, GenericCommands::copy));
         registry.register(CommandSpec.of("select", 2, GenericCommands::select));
+        registry.register(CommandSpec.of("swapdb", 3, GenericCommands::swapdb));
         registry.register(CommandSpec.of("object", -2, GenericCommands::object));
+        // Expiration
+        registry.register(CommandSpec.of("expire", -3, ctx -> expireGeneric(ctx, 1000, false)));
+        registry.register(CommandSpec.of("pexpire", -3, ctx -> expireGeneric(ctx, 1, false)));
+        registry.register(CommandSpec.of("expireat", -3, ctx -> expireGeneric(ctx, 1000, true)));
+        registry.register(CommandSpec.of("pexpireat", -3, ctx -> expireGeneric(ctx, 1, true)));
+        registry.register(CommandSpec.of("ttl", 2, ctx -> ttlGeneric(ctx, false)));
+        registry.register(CommandSpec.of("pttl", 2, ctx -> ttlGeneric(ctx, true)));
+        registry.register(CommandSpec.of("expiretime", 2, ctx -> expireTimeGeneric(ctx, false)));
+        registry.register(CommandSpec.of("pexpiretime", 2, ctx -> expireTimeGeneric(ctx, true)));
+        registry.register(CommandSpec.of("persist", 2, GenericCommands::persist));
+    }
+
+    private static RespValue swapdb(CommandContext ctx) {
+        long a = Keyspaces.parseLong(ctx.arg(1));
+        long b = Keyspaces.parseLong(ctx.arg(2));
+        int count = ctx.server().databaseCount();
+        if (a < 0 || a >= count || b < 0 || b >= count) {
+            throw new CommandException("ERR DB index is out of range");
+        }
+        ctx.server().swapDatabases((int) a, (int) b);
+        return RespValue.OK;
+    }
+
+    /**
+     * Backs {@code EXPIRE}/{@code PEXPIRE}/{@code EXPIREAT}/{@code PEXPIREAT}.
+     *
+     * @param unitMillis 1000 if the argument is in seconds, 1 if milliseconds
+     * @param absolute   whether the argument is an absolute timestamp
+     */
+    private static RespValue expireGeneric(CommandContext ctx, long unitMillis, boolean absolute) {
+        Bytes key = new Bytes(ctx.arg(1));
+        long amount = Keyspaces.parseLong(ctx.arg(2));
+        long now = System.currentTimeMillis();
+        long whenMillis = absolute ? amount * unitMillis : now + amount * unitMillis;
+
+        boolean nx = false;
+        boolean xx = false;
+        boolean gt = false;
+        boolean lt = false;
+        for (int i = 3; i < ctx.argCount(); i++) {
+            switch (ctx.argUpper(i)) {
+                case "NX" -> nx = true;
+                case "XX" -> xx = true;
+                case "GT" -> gt = true;
+                case "LT" -> lt = true;
+                default -> throw new CommandException(
+                        "ERR Unsupported option " + ctx.argText(i));
+            }
+        }
+        if (nx && (xx || gt || lt)) {
+            throw new CommandException(
+                    "ERR NX and XX, GT or LT options at the same time are not compatible");
+        }
+        if (gt && lt) {
+            throw new CommandException("ERR GT and LT options at the same time are not compatible");
+        }
+
+        Database db = ctx.database();
+        if (!db.containsKey(key)) {
+            return RespValue.integer(0);
+        }
+        Long current = db.getExpireAt(key);
+        if ((nx && current != null)
+                || (xx && current == null)
+                || (gt && (current == null || whenMillis <= current))
+                || (lt && current != null && whenMillis >= current)) {
+            return RespValue.integer(0);
+        }
+        if (whenMillis <= now) {
+            db.remove(key); // already in the past: delete immediately, as Redis does
+            return RespValue.integer(1);
+        }
+        db.setExpireAt(key, whenMillis);
+        return RespValue.integer(1);
+    }
+
+    private static RespValue ttlGeneric(CommandContext ctx, boolean millis) {
+        Database db = ctx.database();
+        Bytes key = new Bytes(ctx.arg(1));
+        if (!db.containsKey(key)) {
+            return RespValue.integer(-2);
+        }
+        Long when = db.getExpireAt(key);
+        if (when == null) {
+            return RespValue.integer(-1);
+        }
+        long remaining = when - System.currentTimeMillis();
+        return RespValue.integer(millis ? remaining : (remaining + 500) / 1000);
+    }
+
+    private static RespValue expireTimeGeneric(CommandContext ctx, boolean millis) {
+        Database db = ctx.database();
+        Bytes key = new Bytes(ctx.arg(1));
+        if (!db.containsKey(key)) {
+            return RespValue.integer(-2);
+        }
+        Long when = db.getExpireAt(key);
+        if (when == null) {
+            return RespValue.integer(-1);
+        }
+        return RespValue.integer(millis ? when : when / 1000);
+    }
+
+    private static RespValue persist(CommandContext ctx) {
+        Database db = ctx.database();
+        Bytes key = new Bytes(ctx.arg(1));
+        if (!db.containsKey(key)) {
+            return RespValue.integer(0);
+        }
+        return RespValue.integer(db.persist(key) ? 1 : 0);
     }
 
     private static RespValue del(CommandContext ctx) {

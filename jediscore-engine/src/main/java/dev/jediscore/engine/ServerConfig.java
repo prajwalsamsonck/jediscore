@@ -19,6 +19,8 @@ import java.util.Optional;
  * @param setMaxIntsetEntries    the member-count threshold above which an all-integer set leaves the intset encoding
  * @param setMaxListpackEntries  the member-count threshold above which a set converts to a hashtable
  * @param setMaxListpackValue    the member byte-length threshold above which a set converts to a hashtable
+ * @param zsetMaxListpackEntries the member-count threshold above which a sorted set converts to a skiplist
+ * @param zsetMaxListpackValue   the member byte-length threshold above which a sorted set converts
  */
 public record ServerConfig(
         String host,
@@ -34,7 +36,9 @@ public record ServerConfig(
         int listMaxListpackValue,
         int setMaxIntsetEntries,
         int setMaxListpackEntries,
-        int setMaxListpackValue) {
+        int setMaxListpackValue,
+        int zsetMaxListpackEntries,
+        int zsetMaxListpackValue) {
 
     /** The Redis version JediCore reports itself wire-compatible with. */
     public static final String DEFAULT_VERSION = "7.4.0";
@@ -63,6 +67,12 @@ public record ServerConfig(
     /** Default {@code set-max-listpack-value}. */
     public static final int DEFAULT_SET_MAX_LISTPACK_VALUE = 64;
 
+    /** Default {@code zset-max-listpack-entries}. */
+    public static final int DEFAULT_ZSET_MAX_LISTPACK_ENTRIES = 128;
+
+    /** Default {@code zset-max-listpack-value}. */
+    public static final int DEFAULT_ZSET_MAX_LISTPACK_VALUE = 64;
+
     /**
      * Returns a config with sensible defaults for the given host/port: backlog
      * 511 (Redis's default), no password, 16 databases, and Redis's default
@@ -76,7 +86,8 @@ public record ServerConfig(
         return new ServerConfig(host, port, 511, Optional.empty(), DEFAULT_VERSION, RunId.generate(),
                 DEFAULT_DATABASES, DEFAULT_HASH_MAX_LISTPACK_ENTRIES, DEFAULT_HASH_MAX_LISTPACK_VALUE,
                 DEFAULT_LIST_MAX_LISTPACK_SIZE, DEFAULT_LIST_MAX_LISTPACK_VALUE,
-                DEFAULT_SET_MAX_INTSET_ENTRIES, DEFAULT_SET_MAX_LISTPACK_ENTRIES, DEFAULT_SET_MAX_LISTPACK_VALUE);
+                DEFAULT_SET_MAX_INTSET_ENTRIES, DEFAULT_SET_MAX_LISTPACK_ENTRIES, DEFAULT_SET_MAX_LISTPACK_VALUE,
+                DEFAULT_ZSET_MAX_LISTPACK_ENTRIES, DEFAULT_ZSET_MAX_LISTPACK_VALUE);
     }
 
     /** @return whether a password is configured and therefore AUTH is required */

@@ -213,6 +213,31 @@ Redis from `-Djedicore.diff.redis=host:port` or Testcontainers (CI).
 
 ## Changelog
 
+### Phase 2C — sorted sets, expiration, SWAPDB
+- **Skiplist**: `SkipList` is a faithful port of Redis's `zskiplist` (per-level
+  forward pointers with spans for O(log n) rank). It implements a `SortedIndex`
+  interface alongside `TreeMapSortedIndex` (a `TreeSet`-backed alternative kept
+  for comparison). A randomized differential unit test asserts the two stay
+  observationally identical.
+- **Sorted sets** (`ZSetValue`): listpack↔skiplist encoding (the skiplist form
+  pairs a `HashMap` member→score with the `SkipList`). Full command set: `ZADD`
+  (NX/XX/GT/LT/CH/INCR), `ZINCRBY`, `ZREM`, `ZSCORE`/`ZMSCORE`, `ZRANK`/`ZREVRANK`,
+  `ZCARD`, `ZCOUNT`/`ZLEXCOUNT`, `ZPOPMIN`/`ZPOPMAX`, the `ZRANGE` family
+  (BYSCORE/BYLEX/REV/LIMIT/WITHSCORES) + `ZREVRANGE*`, `ZRANGESTORE`,
+  `ZUNION`/`ZINTER`/`ZDIFF` (+STORE, with WEIGHTS/AGGREGATE), `ZINTERCARD`.
+- **Expiration**: `EXPIRE`/`PEXPIRE`/`EXPIREAT`/`PEXPIREAT` (with NX/XX/GT/LT),
+  `TTL`/`PTTL`/`EXPIRETIME`/`PEXPIRETIME`, `PERSIST`; plus `SWAPDB`.
+- **Differential fuzzer extended** to sorted sets (ZADD/ZSCORE/ZREM/ZCARD/ZRANK/
+  ZINCRBY/ZCOUNT/ZRANGE/ZRANGEBYSCORE) and EXPIRE/PERSIST; passes against Redis 7.4.
+- **Benchmark** (`ZSetBenchmark`): the headline result is rank — **skiplist 12.6
+  vs TreeMap 0.47 ops/µs (~27×; p99 0.2 µs vs 8.4 µs)** on 1000 elements,
+  demonstrating why the skiplist is the real structure. ZADD ≈1.2, ZRANGE ≈3.1
+  ops/µs on the command path. (TreeMap is competitive on plain insert/delete at
+  small N; rank/range is where the skiplist wins, which is what matters.)
+- **Deferred to 2D**: the `SCAN`/`HSCAN`/`SSCAN`/`ZSCAN` cursor family (one shared
+  reverse-binary-cursor algorithm; doing it "correctly under concurrent
+  modification" needs care with our dict, so it gets its own focused pass).
+
 ### Phase 2B — lists & sets
 - **Lists** (`ListValue`): listpack↔quicklist encoding. `Listpack` now implements
   a `SequenceStore` abstraction; `Quicklist` is a real linked sequence of listpack

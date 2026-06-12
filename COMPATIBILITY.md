@@ -106,6 +106,32 @@ document, updated every phase as commands are implemented.
 | `SMOVE` | ✅ Done | Redis argument/lookup ordering. |
 | `SSCAN` | 📋 Planned | With the SCAN cursor family. |
 
+### Sorted sets
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `ZADD` | ✅ Done | `NX`/`XX`/`GT`/`LT`/`CH`/`INCR`; listpack↔skiplist encoding. |
+| `ZINCRBY` `ZREM` `ZSCORE` `ZMSCORE` `ZCARD` | ✅ Done | |
+| `ZRANK` `ZREVRANK` | ✅ Done | `WITHSCORE` option. |
+| `ZRANGE` | ✅ Done | `BYSCORE`/`BYLEX`/`REV`/`LIMIT`/`WITHSCORES`. |
+| `ZREVRANGE` `ZRANGEBYSCORE` `ZREVRANGEBYSCORE` `ZRANGEBYLEX` `ZREVRANGEBYLEX` | ✅ Done | |
+| `ZCOUNT` `ZLEXCOUNT` | ✅ Done | Inclusive/exclusive bounds, `-inf`/`+inf`/`-`/`+`. |
+| `ZPOPMIN` `ZPOPMAX` | ✅ Done | Optional count. |
+| `ZRANGESTORE` | ✅ Done | |
+| `ZUNION` `ZINTER` `ZDIFF` (+ `STORE`) | ✅ Done | `WEIGHTS`/`AGGREGATE`; accepts sets as inputs (score 1). |
+| `ZINTERCARD` | ✅ Done | `LIMIT`. |
+| `ZSCAN` | 📋 Planned | With the SCAN cursor family. |
+
+### Expiration
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `EXPIRE` `PEXPIRE` `EXPIREAT` `PEXPIREAT` | ✅ Done | `NX`/`XX`/`GT`/`LT` options; past times delete immediately. |
+| `TTL` `PTTL` `EXPIRETIME` `PEXPIRETIME` | ✅ Done | |
+| `PERSIST` | ✅ Done | |
+| `SWAPDB` | ✅ Done | |
+| `SCAN` | 📋 Planned | Cursor family (with `HSCAN`/`SSCAN`/`ZSCAN`). |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group
