@@ -22,8 +22,11 @@ import java.util.List;
  * listpack format (which uses varints and a reverse back-length), a distinction
  * that only matters for RDB wire compatibility and is revisited in the
  * persistence phase.
+ *
+ * <p>It implements {@link SequenceStore} so it can serve directly as the small
+ * encoding of a list.
  */
-public final class Listpack {
+public final class Listpack implements SequenceStore {
 
     private static final int HEADER = 4;
 
@@ -46,6 +49,38 @@ public final class Listpack {
     /** @return the number of bytes currently occupied by the arena */
     public int byteSize() {
         return used;
+    }
+
+    // ---- SequenceStore adapters --------------------------------------------
+
+    @Override
+    public int size() {
+        return count;
+    }
+
+    @Override
+    public void addFirst(byte[] value) {
+        insert(0, value);
+    }
+
+    @Override
+    public void addLast(byte[] value) {
+        add(value);
+    }
+
+    @Override
+    public byte[] removeFirst() {
+        byte[] head = get(0);
+        removeAt(0);
+        return head;
+    }
+
+    @Override
+    public byte[] removeLast() {
+        int last = count - 1;
+        byte[] tail = get(last);
+        removeAt(last);
+        return tail;
     }
 
     /**

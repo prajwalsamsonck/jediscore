@@ -37,5 +37,7 @@ public final class CoreCommands {
         GenericCommands.registerAll(registry);
         StringCommands.registerAll(registry);
         HashCommands.registerAll(registry);
+        ListCommands.registerAll(registry);
+        SetCommands.registerAll(registry);
     }
 }

@@ -8,9 +8,10 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 2A — the keyspace, strings, hashes (with listpack↔hashtable
-> encoding), and generic key commands are in place, validated by a jqwik
-> differential test against real Redis. Lists, sets, and sorted sets follow. See
+> **Status:** Phase 2B — strings, hashes, **lists** (listpack↔quicklist), and
+> **sets** (intset↔listpack↔hashtable) are implemented with full command
+> coverage, validated by a jqwik differential test against real Redis. Sorted
+> sets (a self-implemented skiplist) and the SCAN family follow. See
 > [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and
 > [`COMPATIBILITY.md`](COMPATIBILITY.md) for the command matrix.
 

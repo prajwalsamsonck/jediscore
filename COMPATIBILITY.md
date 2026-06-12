@@ -83,6 +83,29 @@ document, updated every phase as commands are implemented.
 | `HRANDFIELD` | 🚧 Partial | `WITHVALUES` returns a flat array (RESP3 nesting deferred). |
 | `HSCAN` | 📋 Planned | With the SCAN cursor family. |
 
+### Lists
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `LPUSH` `RPUSH` `LPUSHX` `RPUSHX` | ✅ Done | listpack↔quicklist encoding. |
+| `LPOP` `RPOP` | ✅ Done | Optional count. |
+| `LRANGE` `LLEN` `LINDEX` | ✅ Done | Negative indices. |
+| `LSET` `LINSERT` `LREM` `LTRIM` | ✅ Done | Argument validation ordered as in Redis. |
+| `RPOPLPUSH` `LMOVE` | ✅ Done | Same-key rotation supported. |
+| `LPOS` | ✅ Done | `RANK`/`COUNT`/`MAXLEN`. |
+
+### Sets
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `SADD` `SREM` `SCARD` `SISMEMBER` `SMISMEMBER` | ✅ Done | intset↔listpack↔hashtable encoding. |
+| `SMEMBERS` | ✅ Done | Order unspecified (as in Redis). |
+| `SPOP` `SRANDMEMBER` | ✅ Done | Optional count (negative = with repetition). |
+| `SUNION` `SINTER` `SDIFF` (+ `STORE`) | ✅ Done | |
+| `SINTERCARD` | ✅ Done | `LIMIT` option. |
+| `SMOVE` | ✅ Done | Redis argument/lookup ordering. |
+| `SSCAN` | 📋 Planned | With the SCAN cursor family. |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

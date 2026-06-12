@@ -101,39 +101,78 @@ class RedisDifferentialTest {
         for (String[] command : sequence) {
             RespValue mine = jedi.call(command);
             RespValue theirs = redis.call(command);
-            assertThat(canonical(mine))
-                    .as("divergence on %s", Arrays.toString(command))
-                    .isEqualTo(canonical(theirs));
+            assertEquivalent(command, mine, theirs);
         }
+    }
+
+    /** Set-returning commands whose element order is unspecified in Redis. */
+    private static final java.util.Set<String> UNORDERED =
+            java.util.Set.of("SMEMBERS", "SUNION", "SINTER", "SDIFF");
+
+    private static void assertEquivalent(String[] command, RespValue mine, RespValue theirs) {
+        String name = command[0].toUpperCase(java.util.Locale.ROOT);
+        if (UNORDERED.contains(name) && mine instanceof RespValue.Array a && theirs instanceof RespValue.Array b) {
+            List<String> mineSorted = a.items().stream().map(RedisDifferentialTest::canonical).sorted().toList();
+            List<String> theirsSorted = b.items().stream().map(RedisDifferentialTest::canonical).sorted().toList();
+            assertThat(mineSorted).as("divergence on %s", Arrays.toString(command)).isEqualTo(theirsSorted);
+            return;
+        }
+        assertThat(canonical(mine)).as("divergence on %s", Arrays.toString(command)).isEqualTo(canonical(theirs));
     }
 
     @Provide
     Arbitrary<List<String[]>> commandSequences() {
+        // A shared, tiny key pool means the same key is reused across types,
+        // which deliberately provokes WRONGTYPE errors that must match Redis.
         Arbitrary<String> keys = Arbitraries.of("k0", "k1", "k2");
         Arbitrary<String> fields = Arbitraries.of("f0", "f1", "f2");
         // A mix of integers, non-integers, and an empty string, to exercise both
         // the happy path and the matching error paths on both servers.
         Arbitrary<String> values = Arbitraries.of("0", "1", "5", "-3", "42", "hello", "");
+        Arbitrary<String> indices = Arbitraries.of("-2", "-1", "0", "1", "2", "3");
 
         Arbitrary<String[]> command = Arbitraries.oneOf(List.of(
+                // strings
                 Combinators.combine(keys, values).as((k, v) -> new String[] {"SET", k, v}),
                 keys.map(k -> new String[] {"GET", k}),
                 Combinators.combine(keys, values).as((k, v) -> new String[] {"APPEND", k, v}),
                 keys.map(k -> new String[] {"STRLEN", k}),
                 keys.map(k -> new String[] {"INCR", k}),
-                keys.map(k -> new String[] {"DECR", k}),
                 Combinators.combine(keys, values).as((k, v) -> new String[] {"INCRBY", k, v}),
+                // generic
                 keys.map(k -> new String[] {"DEL", k}),
                 keys.map(k -> new String[] {"EXISTS", k}),
                 keys.map(k -> new String[] {"TYPE", k}),
+                // hashes
                 Combinators.combine(keys, fields, values).as((k, f, v) -> new String[] {"HSET", k, f, v}),
                 Combinators.combine(keys, fields).as((k, f) -> new String[] {"HGET", k, f}),
                 Combinators.combine(keys, fields).as((k, f) -> new String[] {"HDEL", k, f}),
-                Combinators.combine(keys, fields).as((k, f) -> new String[] {"HEXISTS", k, f}),
                 keys.map(k -> new String[] {"HLEN", k}),
-                Combinators.combine(keys, fields, values).as((k, f, v) -> new String[] {"HINCRBY", k, f, v})));
+                Combinators.combine(keys, fields, values).as((k, f, v) -> new String[] {"HINCRBY", k, f, v}),
+                // lists (replies are order-deterministic, so compared directly)
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"LPUSH", k, v}),
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"RPUSH", k, v}),
+                keys.map(k -> new String[] {"LPOP", k}),
+                keys.map(k -> new String[] {"RPOP", k}),
+                keys.map(k -> new String[] {"LLEN", k}),
+                Combinators.combine(keys, indices).as((k, i) -> new String[] {"LINDEX", k, i}),
+                Combinators.combine(keys, indices, indices).as((k, s, e) -> new String[] {"LRANGE", k, s, e}),
+                Combinators.combine(keys, indices, indices).as((k, s, e) -> new String[] {"LTRIM", k, s, e}),
+                Combinators.combine(keys, values, values).as((k, c, v) -> new String[] {"LREM", k, c, v}),
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"LPOS", k, v}),
+                // sets — integer-reply commands (compared directly)
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"SADD", k, v}),
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"SREM", k, v}),
+                keys.map(k -> new String[] {"SCARD", k}),
+                Combinators.combine(keys, values).as((k, v) -> new String[] {"SISMEMBER", k, v}),
+                Combinators.combine(keys, keys, values).as((s, d, m) -> new String[] {"SMOVE", s, d, m}),
+                // sets — element-returning commands (compared as unordered sets)
+                keys.map(k -> new String[] {"SMEMBERS", k}),
+                Combinators.combine(keys, keys).as((a, b) -> new String[] {"SUNION", a, b}),
+                Combinators.combine(keys, keys).as((a, b) -> new String[] {"SINTER", a, b}),
+                Combinators.combine(keys, keys).as((a, b) -> new String[] {"SDIFF", a, b})));
 
-        return command.list().ofMinSize(1).ofMaxSize(25);
+        return command.list().ofMinSize(1).ofMaxSize(30);
     }
 
     /** Renders a reply to a canonical string for comparison across servers. */

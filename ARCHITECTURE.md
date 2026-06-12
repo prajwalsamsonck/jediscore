@@ -213,6 +213,29 @@ Redis from `-Djedicore.diff.redis=host:port` or Testcontainers (CI).
 
 ## Changelog
 
+### Phase 2B — lists & sets
+- **Lists** (`ListValue`): listpack↔quicklist encoding. `Listpack` now implements
+  a `SequenceStore` abstraction; `Quicklist` is a real linked sequence of listpack
+  nodes (Redis's design). Full command set: `LPUSH`/`RPUSH`(`X`), `LPOP`/`RPOP`
+  (with count), `LRANGE`/`LLEN`/`LINDEX`/`LSET`/`LINSERT`/`LREM`/`LTRIM`,
+  `RPOPLPUSH`/`LMOVE`, `LPOS`.
+- **Sets** (`SetValue`): the full three-way **intset↔listpack↔hashtable** encoding
+  (`IntSet` is a sorted `long[]`). Full command set: `SADD`/`SREM`/`SCARD`/
+  `SISMEMBER`/`SMISMEMBER`/`SMEMBERS`, `SPOP`/`SRANDMEMBER`, `SUNION`/`SINTER`/
+  `SDIFF` (+ `STORE`), `SINTERCARD`, `SMOVE`.
+- **Differential fuzzer extended** to lists (order-deterministic, compared
+  directly) and sets (element-returning commands compared as unordered sets). It
+  caught two more real bugs — `LREM` and `SMOVE` validated/short-circuited in the
+  wrong order relative to Redis (argument parsing and source-missing must precede
+  type checks). All fixed; the property passes against Redis 7.4.
+- **Benchmarks** (`CollectionBenchmark`, command path, smoke profile): setAdd
+  ≈2.2, setIsMember ≈2.2, listRange(10) ≈0.77, listPushPop ≈1.28 ops/µs; p99
+  setIsMember ≈0.9 µs, setAdd ≈1.1 µs (the bench set is listpack-encoded, so
+  membership is a linear scan — as in Redis).
+- **Deferred to 2C**: Sorted Sets (self-implemented skiplist), the
+  `SCAN`/`HSCAN`/`SSCAN`/`ZSCAN` cursor family, `SWAPDB`, the `EXPIRE`/`TTL`
+  command family, and ZADD/ZRANGE benchmarks.
+
 ### Phase 2A — keyspace, strings, hashes (split per the self-management rule)
 - **Keyspace**: `Database` (dict + lazy expiry), 16 databases, per-connection
   `SELECT`; `Bytes` binary-safe key wrapper; `CommandException` for typed errors.

@@ -1,7 +1,9 @@
 package dev.jediscore.commands;
 
 import dev.jediscore.datastructures.HashValue;
+import dev.jediscore.datastructures.ListValue;
 import dev.jediscore.datastructures.RedisValue;
+import dev.jediscore.datastructures.SetValue;
 import dev.jediscore.datastructures.StringValue;
 import dev.jediscore.engine.CommandContext;
 import dev.jediscore.engine.CommandException;
@@ -57,6 +59,53 @@ final class Keyspaces {
         return new HashValue(
                 ctx.server().config().hashMaxListpackEntries(),
                 ctx.server().config().hashMaxListpackValue());
+    }
+
+    /**
+     * Returns the value as a {@link ListValue}, or throws {@code WRONGTYPE}.
+     *
+     * @param value the value (may be {@code null})
+     * @return the list value, or {@code null} if {@code value} was {@code null}
+     */
+    static ListValue asList(RedisValue value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof ListValue l) {
+            return l;
+        }
+        throw CommandException.wrongType();
+    }
+
+    /**
+     * Returns the value as a {@link SetValue}, or throws {@code WRONGTYPE}.
+     *
+     * @param value the value (may be {@code null})
+     * @return the set value, or {@code null} if {@code value} was {@code null}
+     */
+    static SetValue asSet(RedisValue value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof SetValue s) {
+            return s;
+        }
+        throw CommandException.wrongType();
+    }
+
+    /** @return a new, config-sized list value */
+    static ListValue newList(CommandContext ctx) {
+        return new ListValue(
+                ctx.server().config().listMaxListpackSize(),
+                ctx.server().config().listMaxListpackValue());
+    }
+
+    /** @return a new, config-sized set value */
+    static SetValue newSet(CommandContext ctx) {
+        return new SetValue(
+                ctx.server().config().setMaxIntsetEntries(),
+                ctx.server().config().setMaxListpackEntries(),
+                ctx.server().config().setMaxListpackValue());
     }
 
     /**
