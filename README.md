@@ -8,10 +8,21 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 0 — repository, build tooling, and CI are stood up. The engine,
-> networking, and data structures arrive in subsequent phases. See
-> [`ARCHITECTURE.md`](ARCHITECTURE.md) for the roadmap and
+> **Status:** Phase 1 — the Netty TCP server and full RESP2/RESP3 protocol are in
+> place. `redis-cli` connects and runs `PING`/`ECHO`/`HELLO`/`CLIENT`/`COMMAND`.
+> Data structures and key commands arrive in subsequent phases. See
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and
 > [`COMPATIBILITY.md`](COMPATIBILITY.md) for the command matrix.
+
+```text
+$ redis-cli -p 6379 PING
+PONG
+$ redis-cli -p 6379 HELLO 3
+1# "server" => "jediscore"
+2# "version" => "7.4.0"
+3# "proto" => (integer) 3
+...
+```
 
 ## Requirements
 

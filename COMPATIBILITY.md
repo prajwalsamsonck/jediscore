@@ -16,15 +16,29 @@ document, updated every phase as commands are implemented.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| RESP2 | 📋 Planned | Phase 1. |
-| RESP3 | 📋 Planned | Phase 1. |
-| Inline commands | 📋 Planned | Phase 1. |
+| RESP2 | ✅ Done | Default dialect; full encode/decode. |
+| RESP3 | ✅ Done | Negotiated via `HELLO 3`; all typed replies supported. |
+| Inline commands | ✅ Done | Whitespace split with single/double-quote and escape handling. |
+| Pipelining | ✅ Done | Multiple commands per read; partials buffered across reads. |
+| Protocol errors | ✅ Done | `-ERR Protocol error: …` then connection close, as in Redis. |
 
 ## Command matrix
 
+### Connection & server
+
 | Command | Status | Notes |
 |---------|--------|-------|
-| _(none yet)_ | — | Phase 0 establishes tooling only; commands begin in Phase 2 (`PING`/`ECHO`/`HELLO`). |
+| `PING` | ✅ Done | `+PONG`, or echoes one argument; arity-checks >2 args. |
+| `ECHO` | ✅ Done | |
+| `HELLO` | ✅ Done | Protocol negotiation (2/3), `AUTH`/`SETNAME` options, `NOPROTO` on bad version. |
+| `AUTH` | 🚧 Partial | Single `requirepass` against the implicit `default` user; full ACLs deferred. |
+| `QUIT` | ✅ Done | Replies `+OK`, then closes after flush. |
+| `RESET` | ✅ Done | Resets protocol/name/auth; transactions & pubsub state reset when those land. |
+| `CLIENT ID` | ✅ Done | |
+| `CLIENT GETNAME` / `SETNAME` | ✅ Done | `SETNAME` rejects spaces/newlines/control chars. |
+| `CLIENT INFO` | 🚧 Partial | Representative field subset (no buffer/memory counters yet). |
+| `CLIENT SETINFO` | ✅ Done | Accepts `lib-name`/`lib-ver` advertisements. |
+| `COMMAND` | 🚧 Partial | Full table, `COUNT`, `LIST`, `INFO`; `DOCS` returns an empty (valid) map; key specs reported as 0. |
 
 <!--
   Maintenance: as each command lands, add a row above with its status and any

@@ -1,0 +1,92 @@
+package dev.jediscore.engine;
+
+import java.util.Collection;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Shared server-wide state and services: configuration, the command registry,
+ * the command-execution loop, and the live-connection table.
+ *
+ * <p>The connection table is a {@link ConcurrentHashMap} because connections are
+ * added/removed on Netty I/O threads (on connect/disconnect) while commands such
+ * as {@code CLIENT INFO} read it on the command thread.
+ */
+public final class ServerContext {
+
+    private final ServerConfig config;
+    private final CommandRegistry registry;
+    private final CommandExecutor executor;
+    private final AtomicLong clientIdSeq = new AtomicLong(0);
+    private final ConcurrentHashMap<Long, ClientConnection> clients = new ConcurrentHashMap<>();
+
+    /**
+     * Creates a server context.
+     *
+     * @param config   the configuration
+     * @param registry the (already populated) command registry
+     * @param executor the command-execution loop
+     */
+    public ServerContext(ServerConfig config, CommandRegistry registry, CommandExecutor executor) {
+        this.config = config;
+        this.registry = registry;
+        this.executor = executor;
+    }
+
+    /** @return the configuration */
+    public ServerConfig config() {
+        return config;
+    }
+
+    /** @return the command registry */
+    public CommandRegistry registry() {
+        return registry;
+    }
+
+    /** @return the command-execution loop */
+    public CommandExecutor executor() {
+        return executor;
+    }
+
+    /** @return whether AUTH is required before other commands */
+    public boolean requiresAuth() {
+        return config.requiresAuth();
+    }
+
+    /**
+     * Allocates the next unique client id.
+     *
+     * @return a fresh, monotonically increasing id
+     */
+    public long nextClientId() {
+        return clientIdSeq.incrementAndGet();
+    }
+
+    /**
+     * Registers a live connection.
+     *
+     * @param connection the connection
+     */
+    public void register(ClientConnection connection) {
+        clients.put(connection.id(), connection);
+    }
+
+    /**
+     * Removes a connection from the live table.
+     *
+     * @param connection the connection
+     */
+    public void unregister(ClientConnection connection) {
+        clients.remove(connection.id());
+    }
+
+    /** @return the current live connections */
+    public Collection<ClientConnection> connections() {
+        return clients.values();
+    }
+
+    /** @return the number of live connections */
+    public int connectionCount() {
+        return clients.size();
+    }
+}

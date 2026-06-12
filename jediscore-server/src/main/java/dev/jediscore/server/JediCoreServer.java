@@ -1,59 +1,78 @@
 package dev.jediscore.server;
 
+import dev.jediscore.engine.ServerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Entry point for the JediCore server.
+ * Command-line entry point for the JediCore server.
  *
- * <p><strong>Phase&nbsp;0 behaviour:</strong> this proves the assembled
- * application builds, launches on the pinned Java&nbsp;21 toolchain, prints a
- * banner, logs its environment, and exits cleanly with status&nbsp;0. There is
- * deliberately no networking yet — the Netty listener arrives in Phase&nbsp;2.
+ * <p>It parses a minimal configuration from the arguments, starts the server via
+ * {@link JediCore}, installs a shutdown hook for graceful termination, and then
+ * blocks until the server is closed.
  *
- * <p>The body is intentionally side-effect-light and synchronous so it can be
- * driven directly from a unit test (see {@code JediCoreServerTest}).
+ * <p>Usage: {@code jediscore [port] | [host:port]} (defaults to
+ * {@code 127.0.0.1:6379}).
  */
 public final class JediCoreServer {
 
     private static final Logger log = LoggerFactory.getLogger(JediCoreServer.class);
 
     /** Human-readable version tag for the current development phase. */
-    public static final String VERSION = "0.0.1-phase0";
+    public static final String VERSION = "0.1.0-phase1";
+
+    private static final String DEFAULT_HOST = "127.0.0.1";
+    private static final int DEFAULT_PORT = 6379;
 
     private JediCoreServer() {
         // Application entry point; not instantiable.
     }
 
     /**
-     * Boots the server.
+     * Boots the server and blocks until shutdown.
      *
-     * @param args command-line arguments (ignored in Phase&nbsp;0)
+     * @param args optional {@code port} or {@code host:port}
+     * @throws InterruptedException if interrupted while running
      */
-    public static void main(String[] args) {
-        run(args);
+    public static void main(String[] args) throws InterruptedException {
+        System.out.print(banner());
+
+        ServerConfig config = parseConfig(args);
+        log.info("JediCore {} starting (RESP2/RESP3, single command thread)", VERSION);
+        log.info("  java.version = {}", System.getProperty("java.version"));
+        log.info("  run_id       = {}", config.runId());
+
+        JediCore jediCore = JediCore.start(config);
+        log.info("Ready to accept connections tcp on {}:{}", config.host(), jediCore.port());
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Shutdown signal received; stopping JediCore");
+            jediCore.close();
+        }, "jedicore-shutdown"));
+
+        jediCore.awaitShutdown();
     }
 
     /**
-     * The testable core of {@link #main(String[])}. Kept package-visible so a
-     * unit test can assert it completes without throwing and without calling
-     * {@code System.exit}.
+     * Parses {@code [port]} or {@code [host:port]} into a configuration.
      *
-     * @param args command-line arguments (ignored in Phase&nbsp;0)
+     * @param args the command-line arguments
+     * @return the parsed configuration, falling back to defaults
      */
-    static void run(String[] args) {
-        System.out.print(banner());
-
-        log.info("JediCore {} starting up", VERSION);
-        log.info("  java.version  = {}", System.getProperty("java.version"));
-        log.info("  java.vendor   = {}", System.getProperty("java.vendor"));
-        log.info("  os            = {} {} ({})",
-                System.getProperty("os.name"),
-                System.getProperty("os.version"),
-                System.getProperty("os.arch"));
-        log.info("  args          = {}", args.length == 0 ? "(none)" : String.join(" ", args));
-        log.info("Phase 0: no subsystems wired yet (no networking, persistence, or replication).");
-        log.info("Shutting down cleanly. Goodbye.");
+    static ServerConfig parseConfig(String[] args) {
+        String host = DEFAULT_HOST;
+        int port = DEFAULT_PORT;
+        if (args.length >= 1 && !args[0].isBlank()) {
+            String arg = args[0];
+            int colon = arg.lastIndexOf(':');
+            if (colon >= 0) {
+                host = arg.substring(0, colon);
+                port = Integer.parseInt(arg.substring(colon + 1));
+            } else {
+                port = Integer.parseInt(arg);
+            }
+        }
+        return ServerConfig.defaults(host, port);
     }
 
     /**
@@ -62,7 +81,6 @@ public final class JediCoreServer {
      * @return a multi-line ASCII banner ending with a trailing newline
      */
     static String banner() {
-        // Text block keeps the art readable in source; %s injects the version.
         return """
 
                    __         _ _  _____

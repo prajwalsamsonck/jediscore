@@ -97,7 +97,101 @@ document its memory/latency trade-offs rather than pretend the fork model exists
 - **CI** (GitHub Actions) builds, runs all tests, and runs a JMH smoke benchmark, with
   Gradle caching.
 
+## Network & protocol layer (Phase 1)
+
+### The RESP codec (`jediscore-protocol`)
+
+The protocol module owns the RESP value model and codec and depends on
+`netty-buffer` only, so it can parse and encode directly against `ByteBuf`
+without copying everything to `String` first. There are deliberately two parse
+entry points:
+
+- **`parseRequest(ByteBuf) → byte[][]`** — the server hot path. Clients only ever
+  send `*`-multibulk arrays of bulk strings or plain inline lines, so this path
+  produces the raw argument vector with no `RespValue` allocation, parsing
+  lengths straight off the buffer.
+- **`parse(ByteBuf) → RespValue`** — the full model, covering every RESP2/RESP3
+  type (used for replies, round-trip tests, and the future client/replication
+  paths).
+
+Both are **incremental**: a Java `null` return means "not enough bytes yet" and
+the reader index is rewound, so TCP fragmentation is handled by simply waiting
+for more data. A genuine RESP null is the singleton `RespValue.NULL`, never a
+Java `null`. The **encoder is version-aware**: RESP3-only types are downgraded
+to their RESP2 form (null→`$-1`, boolean→`:0/:1`, map→flat array, double/big
+number/verbatim→bulk) so a RESP2 client always receives something it can read.
+
+### Request lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant IO as Netty I/O thread
+    participant Dec as RespRequestDecoder
+    participant Cmd as Command thread (single writer)
+    participant Enc as RespResponseEncoder
+    C->>IO: bytes (RESP multibulk / inline)
+    IO->>Dec: channelRead(ByteBuf)
+    Dec->>Dec: parseRequest() — drain all complete frames,<br/>leave partial frame buffered
+    Dec->>Cmd: submit RespRequest (per request, in read order)
+    Cmd->>Cmd: dispatch: arity → auth gate → handler
+    Cmd->>Enc: writeAndFlush(RespValue)
+    Enc->>IO: encode at the connection's negotiated RESP version
+    IO->>C: reply bytes (in request order)
+```
+
+### Channel pipeline & threading
+
+```mermaid
+graph LR
+    sock[(TCP socket)] --> dec[RespRequestDecoder<br/>ByteToMessageDecoder]
+    dec --> enc[RespResponseEncoder<br/>MessageToByteEncoder]
+    enc --> h[CommandHandler]
+    h -- submit Runnable --> loop[Command thread<br/>single FIFO writer]
+    loop -- writeAndFlush --> enc
+```
+
+Netty worker threads do only I/O (decode/encode). Each decoded request is handed
+to the **single command thread**; the reply is written back from there via
+`writeAndFlush` (thread-safe, hops to the I/O thread). Because the executor is a
+single FIFO thread and a connection's requests are submitted in read order,
+**replies are emitted in request order** — which is what makes pipelining
+correct. The negotiated `RespVersion` lives as a `volatile` field on
+`ClientConnection` (set on the command thread by `HELLO`, read on the I/O thread
+by the encoder).
+
+A protocol violation makes the decoder reply `-ERR Protocol error: <reason>` and
+close the connection, exactly as Redis does.
+
 ## Changelog
+
+### Phase 1 — networking foundation & full RESP protocol
+- **RESP2 + RESP3 codec** in `jediscore-protocol`: a sealed `RespValue` model
+  covering every type (simple string/error, integer, bulk, array, null, double,
+  boolean, big number, verbatim, blob error, map, set, push, attribute); a
+  version-aware encoder with correct RESP2 downgrades; an incremental parser
+  (full model) and a zero-`RespValue`-allocation request parser (multibulk +
+  inline, with quote handling).
+- **Netty TCP server** (`jediscore-network`): configurable host/port/backlog,
+  per-connection pipeline, graceful shutdown; protocol errors reply then close.
+- **Engine dispatch** (`jediscore-engine`): `CommandRegistry`,
+  `CommandDispatcher` with Redis-exact arity/unknown-command/auth errors, the
+  single-threaded `CommandExecutor`, `ClientConnection`, `ServerContext`.
+- **Commands** (`jediscore-commands`): `PING`, `ECHO`, `HELLO` (RESP2/RESP3
+  negotiation), `COMMAND` (count/list/info/docs), `QUIT`, `RESET`, `AUTH`,
+  `CLIENT` (ID/GETNAME/SETNAME/INFO/SETINFO).
+- **Server** (`jediscore-server`): `JediCore` composition root + runnable
+  `main` that binds and serves.
+- **Tests**: codec round-trips for every type (RESP2 + RESP3), malformed-input
+  protocol errors, byte-at-a-time fragmentation, request-parser/inline cases,
+  dispatcher arity/auth, an `EmbeddedChannel` decoder test, a raw-socket
+  end-to-end test (PING/ECHO/HELLO/pipelining/QUIT), and a Testcontainers
+  `redis-cli` wire-compat test (skips without Docker; runs in CI).
+- **Benchmarks**: `RespParseBenchmark` for request parse + reply encode.
+- **Honest note**: the Testcontainers IT is skipped on the dev machine because
+  its bleeding-edge Docker 29.x daemon is incompatible with the bundled
+  docker-java client; wire compatibility was instead verified by pointing the
+  official `redis-cli` (via `docker run`) directly at the running server.
 
 ### Phase 0 — repository, build tooling, CI
 - Stood up the 9-module Gradle build with the dependency graph above (modules are
