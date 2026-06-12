@@ -37,6 +37,11 @@ public final class CommandContext {
         return connection;
     }
 
+    /** @return the database currently selected by the issuing connection */
+    public Database database() {
+        return server.database(connection.db());
+    }
+
     /** @return the number of arguments, including the command name */
     public int argCount() {
         return args.length;

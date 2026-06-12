@@ -19,9 +19,10 @@ public final class ServerContext {
     private final CommandExecutor executor;
     private final AtomicLong clientIdSeq = new AtomicLong(0);
     private final ConcurrentHashMap<Long, ClientConnection> clients = new ConcurrentHashMap<>();
+    private final Database[] databases;
 
     /**
-     * Creates a server context.
+     * Creates a server context, allocating the configured number of databases.
      *
      * @param config   the configuration
      * @param registry the (already populated) command registry
@@ -31,6 +32,26 @@ public final class ServerContext {
         this.config = config;
         this.registry = registry;
         this.executor = executor;
+        this.databases = new Database[config.databases()];
+        for (int i = 0; i < databases.length; i++) {
+            databases[i] = new Database(i, System::currentTimeMillis);
+        }
+    }
+
+    /**
+     * Returns the database at the given index.
+     *
+     * @param index the database index
+     * @return the database
+     * @throws IndexOutOfBoundsException if {@code index} is outside {@code [0, databaseCount())}
+     */
+    public Database database(int index) {
+        return databases[index];
+    }
+
+    /** @return the number of databases */
+    public int databaseCount() {
+        return databases.length;
     }
 
     /** @return the configuration */

@@ -40,6 +40,49 @@ document, updated every phase as commands are implemented.
 | `CLIENT SETINFO` | ✅ Done | Accepts `lib-name`/`lib-ver` advertisements. |
 | `COMMAND` | 🚧 Partial | Full table, `COUNT`, `LIST`, `INFO`; `DOCS` returns an empty (valid) map; key specs reported as 0. |
 
+### Generic key commands
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `DEL` / `UNLINK` | ✅ Done | UNLINK is synchronous (semantically identical reply). |
+| `EXISTS` | ✅ Done | Counts multiplicity. |
+| `TYPE` | ✅ Done | |
+| `KEYS` | ✅ Done | Redis glob (`*`, `?`, `[...]`, `\`). |
+| `RENAME` / `RENAMENX` | ✅ Done | Moves value and TTL; `ERR no such key` when source absent. |
+| `RANDOMKEY` | ✅ Done | |
+| `TOUCH` | ✅ Done | |
+| `COPY` | ✅ Done | `REPLACE` and `DB` options; deep copy + TTL. |
+| `SELECT` | ✅ Done | 16 databases; `ERR DB index is out of range`. |
+| `DBSIZE` | ✅ Done | Excludes logically-expired keys. |
+| `FLUSHDB` / `FLUSHALL` | ✅ Done | `ASYNC`/`SYNC` accepted (flushing is synchronous). |
+| `OBJECT ENCODING/REFCOUNT/IDLETIME` | 🚧 Partial | REFCOUNT always 1 (no object sharing). |
+| `EXPIRE`/`TTL`/`PERSIST` family | 📋 Planned | TTL infra exists (SET EX, GETEX); commands land in a later phase. |
+| `SCAN` | 📋 Planned | With the SCAN cursor family. |
+| `SWAPDB` | 📋 Planned | |
+
+### Strings
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `SET` | ✅ Done | `EX`/`PX`/`EXAT`/`PXAT`/`NX`/`XX`/`KEEPTTL`/`GET`. |
+| `GET` `GETSET` `GETDEL` `GETEX` | ✅ Done | |
+| `APPEND` `STRLEN` | ✅ Done | Mutation forces `raw` encoding. |
+| `INCR` `DECR` `INCRBY` `DECRBY` | ✅ Done | Overflow → `ERR ... would overflow`. |
+| `INCRBYFLOAT` | 🚧 Partial | IEEE-754 double, not C long double — least-significant digits may differ for non-exact decimals (documented in code). |
+| `SETRANGE` `GETRANGE` | ✅ Done | |
+| `MSET` `MGET` `MSETNX` `SETNX` `SETEX` `PSETEX` | ✅ Done | |
+
+### Hashes
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `HSET` `HSETNX` `HMSET` `HGET` `HMGET` `HGETALL` | ✅ Done | listpack↔hashtable encoding. |
+| `HDEL` `HEXISTS` `HKEYS` `HVALS` `HLEN` `HSTRLEN` | ✅ Done | Empty hash is deleted. |
+| `HINCRBY` | ✅ Done | Validates before creating the key. |
+| `HINCRBYFLOAT` | 🚧 Partial | Same double caveat as `INCRBYFLOAT`. |
+| `HRANDFIELD` | 🚧 Partial | `WITHVALUES` returns a flat array (RESP3 nesting deferred). |
+| `HSCAN` | 📋 Planned | With the SCAN cursor family. |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

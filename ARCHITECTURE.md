@@ -163,7 +163,80 @@ by the encoder).
 A protocol violation makes the decoder reply `-ERR Protocol error: <reason>` and
 close the connection, exactly as Redis does.
 
+## Keyspace & data types (Phase 2)
+
+### Value model and encodings
+
+Every stored value is a `RedisValue` (a sealed type in `jediscore-datastructures`)
+that reports its logical `RedisType` and its current `encoding`. Like Redis,
+collections use a compact representation while small and convert to a full
+structure past configurable thresholds:
+
+```mermaid
+graph TD
+    db[Database<br/>dict + expires]
+    db --> sv[StringValue<br/>int / embstr / raw]
+    db --> hv[HashValue]
+    hv -->|≤ hash-max-listpack-entries<br/>and values ≤ hash-max-listpack-value| lp[Listpack<br/>single byte[] arena]
+    hv -->|exceeds threshold| ht[hashtable<br/>LinkedHashMap]
+    lp -. one-way conversion .-> ht
+```
+
+`Listpack` packs all entries into one `byte[]` (length-prefixed), avoiding a heap
+object per element — the memory win that makes Redis cheap for the countless
+small collections a real workload holds. `OBJECT ENCODING` exposes the live
+encoding (`int`/`embstr`/`raw`, `listpack`/`hashtable`).
+
+### Databases and expiration
+
+`ServerContext` holds an array of `Database`s (default 16); a connection's
+`SELECT`ed index lives on `ClientConnection`, and `CommandContext.database()`
+resolves the right one. Each `Database` is a key→value dict plus a parallel
+expires table. Phase 2 uses **lazy expiration**: an expired key is removed on
+the next access (and `KEYS`/`DBSIZE` purge as they scan). Active background
+sampling is a later performance addition, not a correctness requirement.
+
+### Errors
+
+Command handlers throw `CommandException` for client-facing errors (e.g.
+`WRONGTYPE Operation against a key holding the wrong kind of value`,
+`ERR value is not an integer or out of range`); the dispatcher converts these to
+`-ERR`-style replies, keeping them distinct from unexpected internal bugs.
+
+### Correctness: differential testing against real Redis
+
+The gold-standard test (`RedisDifferentialTest`) uses **jqwik** to generate
+random command sequences and replays each against both JediCore and an authentic
+Redis, asserting byte-identical replies. It already caught a real bug (`HINCRBY`
+with a bad increment was creating the key before validation). It runs against a
+Redis from `-Djedicore.diff.redis=host:port` or Testcontainers (CI).
+
 ## Changelog
+
+### Phase 2A — keyspace, strings, hashes (split per the self-management rule)
+- **Keyspace**: `Database` (dict + lazy expiry), 16 databases, per-connection
+  `SELECT`; `Bytes` binary-safe key wrapper; `CommandException` for typed errors.
+- **Encodings**: `Listpack` compact arena; `StringValue` (int/embstr/raw);
+  `HashValue` (listpack↔hashtable at `hash-max-listpack-*` thresholds);
+  `OBJECT ENCODING` reports the live encoding. `Glob` matcher for `KEYS`.
+- **Commands**: full string family (`SET` with all options, `GET`/`GETSET`/
+  `GETDEL`/`GETEX`, `APPEND`/`STRLEN`, `INCR`/`DECR`/`INCRBY`/`DECRBY`/
+  `INCRBYFLOAT`, `SETRANGE`/`GETRANGE`, `MSET`/`MGET`/`MSETNX`/`SETNX`/`SETEX`/
+  `PSETEX`); full hash family except `HSCAN`; generic keys (`DEL`/`UNLINK`/
+  `EXISTS`/`TYPE`/`KEYS`/`RENAME`/`RENAMENX`/`RANDOMKEY`/`TOUCH`/`COPY`/`SELECT`/
+  `DBSIZE`/`FLUSHDB`/`FLUSHALL`/`OBJECT`).
+- **Tests**: data-structure unit tests, `Database` expiry tests, a full keyspace
+  socket integration test, and the **jqwik differential test vs real Redis**
+  (caught and fixed a real `HINCRBY` ordering bug).
+- **Benchmarks**: `KeyspaceBenchmark` (SET ≈10.3, GET ≈14.4 ops/µs; p99 ≈0.2 µs
+  on the command path, excluding network).
+- **Deferred to 2B/2C**: Lists, Sets, Sorted Sets (self-implemented skiplist),
+  the `SCAN`/`HSCAN`/`SSCAN`/`ZSCAN` cursor family, `SWAPDB`, `EXPIRE`/`TTL`
+  command family, and extending the differential fuzzer across those types.
+- **Honest caveats**: `INCRBYFLOAT`/`HINCRBYFLOAT` use IEEE-754 double (no C long
+  double), so non-exact decimals can differ in the last digits;
+  `HRANDFIELD WITHVALUES` returns a flat array (RESP3 nesting deferred);
+  `OBJECT REFCOUNT` is always 1 (no shared-integer pool).
 
 ### Phase 1 — networking foundation & full RESP protocol
 - **RESP2 + RESP3 codec** in `jediscore-protocol`: a sealed `RespValue` model

@@ -23,9 +23,18 @@ dependencies {
     // that arrive once there is a real server to connect to (Phase 2+).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
+    // jqwik powers the property-based differential test against real Redis.
+    testImplementation(libs.jqwik)
 }
 
 application {
     mainClass.set("dev.jediscore.server.JediCoreServer")
     applicationName = "jediscore"
+}
+
+tasks.withType<Test>().configureEach {
+    // Forward the address of a reference Redis (host:port) to the differential
+    // test, so it can run locally against a redis started via `docker run`. When
+    // unset, the test falls back to Testcontainers (CI) or skips.
+    System.getProperty("jedicore.diff.redis")?.let { systemProperty("jedicore.diff.redis", it) }
 }

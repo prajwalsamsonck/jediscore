@@ -15,6 +15,7 @@ dependencies {
     "jmhImplementation"(project(":jediscore-protocol"))
     "jmhImplementation"(project(":jediscore-datastructures"))
     "jmhImplementation"(project(":jediscore-engine"))
+    "jmhImplementation"(project(":jediscore-commands"))
 }
 
 jmh {

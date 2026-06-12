@@ -63,6 +63,9 @@ public final class CommandDispatcher {
         ctx.connection().setLastCommand(spec.name());
         try {
             return spec.handler().execute(ctx);
+        } catch (CommandException e) {
+            // A deliberate, client-facing error (WRONGTYPE, bad integer, syntax, …).
+            return RespValue.error(e.getMessage());
         } catch (RuntimeException e) {
             log.error("Unhandled error executing command '{}'", spec.name(), e);
             return RespValue.error("ERR internal error");

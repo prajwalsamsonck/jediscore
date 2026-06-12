@@ -23,6 +23,7 @@ public final class CoreCommands {
      * @param registry the registry to populate
      */
     public static void registerAll(CommandRegistry registry) {
+        // Connection & server (Phase 1)
         registry.register(CommandSpec.of("ping", -1, Set.of("fast"), new PingCommand()));
         registry.register(CommandSpec.of("echo", 2, Set.of("fast"), new EchoCommand()));
         registry.register(CommandSpec.of("hello", -1, Set.of("fast", "no-auth"), new HelloCommand()));
@@ -31,5 +32,10 @@ public final class CoreCommands {
         registry.register(CommandSpec.of("reset", 1, Set.of("fast", "no-auth"), new ResetCommand()));
         registry.register(CommandSpec.of("auth", -2, Set.of("fast", "no-auth"), new AuthCommand()));
         registry.register(CommandSpec.of("client", -2, Set.of("admin"), new ClientCommand()));
+
+        // Keyspace & data types (Phase 2)
+        GenericCommands.registerAll(registry);
+        StringCommands.registerAll(registry);
+        HashCommands.registerAll(registry);
     }
 }

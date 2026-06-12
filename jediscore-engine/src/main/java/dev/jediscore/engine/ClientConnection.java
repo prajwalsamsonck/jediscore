@@ -29,6 +29,7 @@ public final class ClientConnection {
 
     private boolean closeAfterReply;
     private String lastCommand = "";
+    private int db;
 
     /**
      * Creates a connection record.
@@ -119,6 +120,20 @@ public final class ClientConnection {
         this.closeAfterReply = true;
     }
 
+    /** @return the index of the database this connection has selected */
+    public int db() {
+        return db;
+    }
+
+    /**
+     * Selects a database for this connection (via {@code SELECT}).
+     *
+     * @param db the database index
+     */
+    public void selectDb(int db) {
+        this.db = db;
+    }
+
     /** @return the name of the most recently dispatched command (for {@code CLIENT INFO}) */
     public String lastCommand() {
         return lastCommand;
@@ -144,5 +159,6 @@ public final class ClientConnection {
         this.name = "";
         this.authenticated = authenticatedAfterReset;
         this.closeAfterReply = false;
+        this.db = 0;
     }
 }
