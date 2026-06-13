@@ -70,8 +70,15 @@ public final class CommandDispatcher {
         ctx.connection().setLastCommand(spec.name());
         try {
             RespValue reply = spec.handler().execute(ctx);
-            if (Eviction.isDenyOom(upperName)) {
-                server.markDirty(1); // count data-adding writes toward RDB save points
+            // After a successful write: count it toward RDB save points and feed
+            // the AOF. (Errors thrown above never reach here, so failed writes
+            // are neither counted nor propagated.)
+            if (WriteCommands.isWrite(upperName)) {
+                server.markDirty(1);
+                Persistence persistence = server.persistence();
+                if (persistence != null && persistence.appendOnlyEnabled()) {
+                    persistence.feedAppendOnly(ctx.connection().db(), ctx.args());
+                }
             }
             return reply;
         } catch (CommandException e) {

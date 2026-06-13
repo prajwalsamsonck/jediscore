@@ -73,8 +73,11 @@ document, updated every phase as commands are implemented.
 | `DEBUG RELOAD` | ✅ Done | Save + flush + reload, round-tripping through RDB. |
 | RDB file format | ✅ Done | Cross-compatible with `redis-server` both ways: writes plain encodings (CRC-64 verified by Redis); reads Redis 7.x encodings (intset, listpack, quicklist v2, int-encoded + LZF strings). |
 | RDB save points | ✅ Done | `save 900 1 …`; auto-BGSAVE on the cron. |
-| Startup load | ✅ Done | Loads `dump.rdb` from `dir` if present. |
-| AOF (`BGREWRITEAOF`, appendonly, multi-part) | 📋 Planned | Phase 4B. |
+| Startup load | ✅ Done | Loads `dump.rdb` from `dir` if present; AOF takes precedence when `appendonly yes`. |
+| AOF (`appendonly`, multi-part) | ✅ Done | Redis 7+ multi-part layout: `appendonlydir/` with a `.base.rdb`, `.incr.aof`, and `.manifest`. Verbatim command propagation (with `SELECT` on DB change). |
+| `appendfsync` | ✅ Done | `always` (fsync per command), `everysec` (fsync on the cron), `no` (OS-flushed). Crash-consistency verified under `always` via hard `Stop-Process`. |
+| `BGREWRITEAOF` | ✅ Done | Fork-free: deep-copy snapshot + atomic incr-file switch on the command thread, base RDB + manifest committed off-thread, old files deleted. |
+| AOF limitations | 🚧 Partial | Commands are propagated verbatim — no `SPOP`→`SREM` or `EXPIRE`→`PEXPIREAT` rewriting. Documented crash window between the incr switch and the manifest commit during a rewrite. |
 
 ### Strings
 

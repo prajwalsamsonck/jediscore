@@ -329,7 +329,93 @@ Redis 7.4):
 `dump.rdb` from `dir`; save points (`save 900 1`) trigger `BGSAVE` from the cron
 once the dirty counter and elapsed time both clear a threshold.
 
+## Persistence — AOF (Phase 4B)
+
+### Multi-part layout (Redis 7+)
+
+When `appendonly yes`, JediCore writes the Redis 7 multi-part AOF into
+`appendonlydir/`:
+
+- `appendonly.aof.<seq>.base.rdb` — a base snapshot in **RDB format** (reusing the
+  Phase 4A writer), holding the dataset as of the last rewrite.
+- `appendonly.aof.<seq>.incr.aof` — every write command since that base, encoded as
+  **RESP multibulk** exactly as received on the wire.
+- `appendonly.aof.manifest` — plain-text index, one line per file:
+  `file <name> seq <n> type <b|i>`.
+
+### Write propagation
+
+After a write command succeeds on the command thread, the dispatcher feeds it to
+the AOF verbatim (`WriteCommands.isWrite` gates the set of mutating commands). A
+`SELECT <db>` is injected whenever the target database differs from the last one
+written, so replay restores per-DB placement. **Honest limitation**: commands are
+propagated *as issued* — there is no `SPOP`→`SREM` or `EXPIRE`→`PEXPIREAT`
+rewriting, so a replayed `EXPIRE` is relative to load time, not the original
+instant. A rewrite (below) collapses this drift by re-snapshotting current state.
+
+### fsync policies
+
+`appendfsync` controls durability vs throughput:
+
+- **`always`** — `fsync` after every command, before its reply returns. Survives a
+  hard kill with zero loss (verified by `Stop-Process -Force`); ~110× slower.
+- **`everysec`** — `fsync` once per second from the `ServerCron`. At most ~1 s of
+  writes lost on a crash.
+- **`no`** — only flush to the OS page cache; the OS decides when to `fsync`.
+
+Measured append throughput (JMH): `always` ≈ 2.3k ops/s, `everysec` ≈ 253k,
+`no` ≈ 258k — the disk-latency-vs-memory gap.
+
+### Fork-free rewrite (`BGREWRITEAOF`)
+
+```mermaid
+sequenceDiagram
+    participant Cmd as Command thread
+    participant Bg as rewrite thread
+    Cmd->>Cmd: deep-copy snapshot (PAUSE, O(dataset))
+    Cmd->>Cmd: open new incr file (seq+1), switch appends to it
+    Cmd->>Bg: hand over immutable snapshot
+    Cmd->>Cmd: resume serving (new writes → new incr)
+    Bg->>Bg: write seq+1 base.rdb from snapshot
+    Bg->>Bg: atomically commit the new manifest (temp + move)
+    Bg->>Bg: delete the superseded base/incr files
+```
+
+The incr-file switch happens **on the command thread**, so no write is lost to the
+rewrite. **Documented crash window**: if the process dies after the incr switch but
+before the manifest commit, the old manifest still points at the old (complete)
+files, so startup loads the pre-rewrite state plus any new-incr writes are
+discarded — consistent, never corrupt. The base write and manifest commit are
+atomic (`Files.move`), so the manifest never references a half-written base.
+
+### Startup
+
+`loadOnStartup` prefers the AOF when `appendonly yes`: it parses the manifest,
+loads the base via the RDB stream reader (skipping already-expired keys), then
+replays each incr file through the `CommandDispatcher` against a synthetic
+connection whose `loading` flag suppresses re-appending. Otherwise it falls back to
+`dump.rdb`. `DEBUG RELOAD` always round-trips through RDB regardless of AOF.
+
 ## Changelog
+
+### Phase 4B — AOF persistence
+- **`AofManager`**: Redis 7 multi-part AOF (`base.rdb` + `incr.aof` + `manifest`),
+  verbatim RESP command propagation with `SELECT`-on-DB-change, three `appendfsync`
+  policies, fork-free `BGREWRITEAOF` (snapshot + atomic incr switch on the command
+  thread; base + manifest committed off-thread; old files deleted), and
+  manifest-driven startup replay through the dispatcher.
+- **`Snapshots`** helper shared by RDB and AOF (deep-copy snapshot, encoding limits,
+  RDB-stream load skipping expired keys); `WriteCommands.isWrite` gating.
+- **Wiring**: dispatcher feeds writes to the AOF and marks the dataset dirty;
+  `RdbPersistence` is now a facade over RDB + `AofManager`; `JediCoreServer` parses
+  `--dir`/`--appendonly`/`--appendfsync`.
+- **Command**: `BGREWRITEAOF`.
+- **Tests**: AOF round-trip of every type across a restart (incl. `DEL`/`INCR`
+  replay), `BGREWRITEAOF` compaction + preservation (110 keys, seq-2 base live /
+  seq-1 gone), all three fsync policies parameterized — 5/5 green; plus a manual
+  **crash-consistency** test (hard `Stop-Process -Force` under `appendfsync always`:
+  all 7 keys survived) and a differential re-run vs real Redis 7.4.
+- **Benchmark**: append throughput `always` ≈ 2.3k / `everysec` ≈ 253k / `no` ≈ 258k ops/s.
 
 ### Phase 4A — RDB persistence
 - **CRC-64/redis** (`Crc64`), RDB constants, **LZF** decompression.
@@ -344,8 +430,8 @@ once the dirty counter and elapsed time both clear a threshold.
   verified manually here: real `redis-server` loads JediCore's dump, and JediCore
   loads a real-redis dump (intset/listpack/quicklist + a 500-byte LZF string).
 - **Benchmark**: `BGSAVE` snapshot pause ≈ 0.81 ms / 10k keys; serialize ≈ 0.63 ms.
-- **Deferred to 4B**: AOF (appendonly, fsync policies, `BGREWRITEAOF`, Redis 7
-  multi-part base+incr+manifest, crash-consistency).
+- **Done in 4B**: AOF (appendonly, fsync policies, `BGREWRITEAOF`, Redis 7
+  multi-part base+incr+manifest, crash-consistency) — see the Phase 4B section.
 
 ### Phase 3 — active expiration, memory accounting, eviction
 - **Active expiration**: `ActiveExpiry` probabilistic cycle (sample 20, repeat if

@@ -26,6 +26,7 @@ public final class PersistenceCommands {
     public static void registerAll(CommandRegistry registry) {
         registry.register(CommandSpec.of("save", 1, PersistenceCommands::save));
         registry.register(CommandSpec.of("bgsave", -1, PersistenceCommands::bgsave));
+        registry.register(CommandSpec.of("bgrewriteaof", 1, PersistenceCommands::bgrewriteaof));
         registry.register(CommandSpec.of("lastsave", 1, PersistenceCommands::lastsave));
         registry.register(CommandSpec.of("debug", -2, PersistenceCommands::debug));
     }
@@ -53,6 +54,19 @@ public final class PersistenceCommands {
             throw new CommandException("ERR Background save already in progress");
         }
         return RespValue.simple("Background saving started");
+    }
+
+    private static RespValue bgrewriteaof(CommandContext ctx) {
+        Persistence p = persistence(ctx);
+        if (!p.appendOnlyEnabled()) {
+            // Redis still "schedules" a rewrite even when AOF is off; we report
+            // honestly that there is nothing to rewrite.
+            throw new CommandException("ERR Background append only file rewriting requires AOF to be enabled");
+        }
+        if (!p.rewriteAppendOnly()) {
+            throw new CommandException("ERR Background append only file rewriting already in progress");
+        }
+        return RespValue.simple("Background append only file rewriting started");
     }
 
     private static RespValue lastsave(CommandContext ctx) {

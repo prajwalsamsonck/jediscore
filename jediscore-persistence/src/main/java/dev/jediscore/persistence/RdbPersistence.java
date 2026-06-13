@@ -1,12 +1,8 @@
 package dev.jediscore.persistence;
 
-import dev.jediscore.datastructures.Bytes;
-import dev.jediscore.datastructures.RedisValue;
-import dev.jediscore.engine.Database;
 import dev.jediscore.engine.Persistence;
 import dev.jediscore.engine.PersistenceConfig;
 import dev.jediscore.engine.SavePoint;
-import dev.jediscore.engine.ServerConfig;
 import dev.jediscore.engine.ServerContext;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -16,8 +12,6 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -26,17 +20,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * RDB persistence: synchronous {@code SAVE}, background {@code BGSAVE}, startup
- * loading, {@code DEBUG RELOAD}, and save-point evaluation.
+ * The persistence facade: RDB ({@code SAVE}/{@code BGSAVE}, save points,
+ * {@code DEBUG RELOAD}) plus AOF (delegated to {@link AofManager}).
  *
- * <p><strong>Fork-free snapshot.</strong> The JVM cannot {@code fork()} for
- * copy-on-write, so {@code BGSAVE} takes a <em>consistent deep-copy snapshot</em>
- * of the keyspace on the command thread (the brief stop-the-world), then
- * serializes that immutable snapshot on a background thread while the command
- * thread resumes. {@code SAVE} serializes directly (it already holds the command
- * thread, so a reference snapshot suffices). The snapshot pause is O(dataset
- * size) — larger than Redis's O(page-table) fork — which is the documented cost
- * of lacking fork.
+ * <p><strong>Fork-free RDB snapshot.</strong> {@code SAVE} serializes
+ * synchronously on the command thread; {@code BGSAVE} deep-copies the keyspace on
+ * the command thread (the O(dataset) pause) then serializes off-thread. See
+ * ARCHITECTURE.md for the pause tradeoff vs Redis's {@code fork()}.
+ *
+ * <p><strong>Startup load.</strong> When AOF is enabled it takes precedence over
+ * the RDB; otherwise the RDB is loaded if present.
  */
 public final class RdbPersistence implements Persistence {
 
@@ -44,7 +37,8 @@ public final class RdbPersistence implements Persistence {
 
     private final ServerContext context;
     private final PersistenceConfig config;
-    private final Path file;
+    private final Path rdbFile;
+    private final AofManager aof;
     private final ExecutorService backgroundExecutor =
             Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "jedicore-bgsave");
@@ -63,13 +57,14 @@ public final class RdbPersistence implements Persistence {
     public RdbPersistence(ServerContext context, PersistenceConfig config) {
         this.context = context;
         this.config = config;
-        this.file = Path.of(config.dir(), config.dbFilename());
+        this.rdbFile = Path.of(config.dir(), config.dbFilename());
+        this.aof = new AofManager(context, config);
     }
 
     @Override
     public boolean save() {
         try {
-            writeSnapshot(buildSnapshot(false));
+            writeRdb(Snapshots.of(context, false));
             lastSaveSeconds = System.currentTimeMillis() / 1000;
             context.resetDirty();
             return true;
@@ -83,12 +78,11 @@ public final class RdbPersistence implements Persistence {
         if (!bgsaveInProgress.compareAndSet(false, true)) {
             return false;
         }
-        // Snapshot now (the pause), serialize off-thread.
-        RdbSnapshot snapshot = buildSnapshot(true);
+        RdbSnapshot snapshot = Snapshots.of(context, true);
         context.resetDirty();
         backgroundExecutor.execute(() -> {
             try {
-                writeSnapshot(snapshot);
+                writeRdb(snapshot);
                 lastSaveSeconds = System.currentTimeMillis() / 1000;
                 log.info("Background RDB save completed");
             } catch (IOException e) {
@@ -113,11 +107,13 @@ public final class RdbPersistence implements Persistence {
     @Override
     public void reload() {
         try {
-            writeSnapshot(buildSnapshot(false));
+            writeRdb(Snapshots.of(context, false));
             for (int i = 0; i < context.databaseCount(); i++) {
                 context.database(i).clear();
             }
-            loadFile();
+            try (InputStream in = new BufferedInputStream(Files.newInputStream(rdbFile))) {
+                Snapshots.loadRdbStream(in, context);
+            }
         } catch (IOException e) {
             throw new RdbException("DEBUG RELOAD failed: " + e.getMessage(), e);
         }
@@ -125,34 +121,49 @@ public final class RdbPersistence implements Persistence {
 
     @Override
     public void loadOnStartup() {
-        if (!Files.exists(file)) {
-            return;
-        }
         try {
-            loadFile();
-            log.info("Loaded RDB from {}", file);
+            if (config.appendOnly()) {
+                aof.startup(); // AOF takes precedence and is opened for appending
+            } else if (Files.exists(rdbFile)) {
+                try (InputStream in = new BufferedInputStream(Files.newInputStream(rdbFile))) {
+                    Snapshots.loadRdbStream(in, context);
+                }
+                log.info("Loaded RDB from {}", rdbFile);
+            }
         } catch (IOException e) {
-            throw new RdbException("failed to load RDB " + file + ": " + e.getMessage(), e);
+            throw new RdbException("startup load failed: " + e.getMessage(), e);
         }
     }
 
     @Override
     public void onCron() {
-        if (config.savePoints().isEmpty() || bgsaveInProgress.get()) {
-            return;
-        }
-        long elapsed = System.currentTimeMillis() / 1000 - lastSaveSeconds;
-        long dirty = context.dirty();
-        for (SavePoint point : config.savePoints()) {
-            if (dirty >= point.changes() && elapsed >= point.seconds()) {
-                backgroundSave();
-                return;
-            }
-        }
+        savePointCheck();
+        aof.onCron();
+    }
+
+    @Override
+    public boolean appendOnlyEnabled() {
+        return aof.enabled();
+    }
+
+    @Override
+    public void feedAppendOnly(int database, byte[][] args) {
+        aof.feed(database, args);
+    }
+
+    @Override
+    public boolean rewriteAppendOnly() {
+        return aof.enabled() && aof.rewrite();
+    }
+
+    @Override
+    public boolean appendRewriteInProgress() {
+        return aof.rewriteInProgress();
     }
 
     @Override
     public void shutdown() {
+        aof.close();
         backgroundExecutor.shutdown();
         try {
             if (!backgroundExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -166,66 +177,29 @@ public final class RdbPersistence implements Persistence {
 
     // ---- internals ----------------------------------------------------------
 
-    private RdbSnapshot buildSnapshot(boolean deepCopy) {
-        List<RdbSnapshot.DatabaseSnapshot> dbs = new ArrayList<>();
-        for (int i = 0; i < context.databaseCount(); i++) {
-            Database db = context.database(i);
-            List<Bytes> keys = db.liveKeys();
-            if (keys.isEmpty()) {
-                continue;
-            }
-            List<RdbSnapshot.Entry> entries = new ArrayList<>(keys.size());
-            for (Bytes key : keys) {
-                RedisValue value = db.peek(key);
-                if (value == null) {
-                    continue;
-                }
-                Long expireAt = db.getExpireAt(key);
-                entries.add(new RdbSnapshot.Entry(
-                        key.copy(),
-                        deepCopy ? value.deepCopy() : value,
-                        expireAt == null ? -1 : expireAt));
-            }
-            dbs.add(new RdbSnapshot.DatabaseSnapshot(i, entries));
+    private void savePointCheck() {
+        if (config.savePoints().isEmpty() || bgsaveInProgress.get()) {
+            return;
         }
-        return new RdbSnapshot(dbs);
+        long elapsed = System.currentTimeMillis() / 1000 - lastSaveSeconds;
+        long dirty = context.dirty();
+        for (SavePoint point : config.savePoints()) {
+            if (dirty >= point.changes() && elapsed >= point.seconds()) {
+                backgroundSave();
+                return;
+            }
+        }
     }
 
-    private void writeSnapshot(RdbSnapshot snapshot) throws IOException {
-        Path dir = file.toAbsolutePath().getParent();
+    private void writeRdb(RdbSnapshot snapshot) throws IOException {
+        Path dir = rdbFile.toAbsolutePath().getParent();
         if (dir != null) {
             Files.createDirectories(dir);
         }
-        Path temp = Path.of(file.toString() + ".tmp-" + System.nanoTime());
+        Path temp = Path.of(rdbFile + ".tmp-" + System.nanoTime());
         try (OutputStream out = new BufferedOutputStream(Files.newOutputStream(temp))) {
             RdbWriter.write(snapshot, out);
         }
-        Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-    }
-
-    private void loadFile() throws IOException {
-        long now = System.currentTimeMillis();
-        EncodingLimits limits = limits(context.config());
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
-            new RdbReader(in, limits).readInto((db, key, value, expireAtMs) -> {
-                if (expireAtMs >= 0 && expireAtMs <= now) {
-                    return; // already expired at load time — drop it, as Redis does on a master
-                }
-                Database database = context.database(db);
-                Bytes wrapped = new Bytes(key);
-                database.putKeepTtl(wrapped, value);
-                if (expireAtMs >= 0) {
-                    database.setExpireAt(wrapped, expireAtMs);
-                }
-            });
-        }
-    }
-
-    private static EncodingLimits limits(ServerConfig cfg) {
-        return new EncodingLimits(
-                cfg.hashMaxListpackEntries(), cfg.hashMaxListpackValue(),
-                cfg.listMaxListpackSize(), cfg.listMaxListpackValue(),
-                cfg.setMaxIntsetEntries(), cfg.setMaxListpackEntries(), cfg.setMaxListpackValue(),
-                cfg.zsetMaxListpackEntries(), cfg.zsetMaxListpackValue());
+        Files.move(temp, rdbFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

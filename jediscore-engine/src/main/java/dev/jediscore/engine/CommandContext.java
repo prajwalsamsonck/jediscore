@@ -47,6 +47,11 @@ public final class CommandContext {
         return args.length;
     }
 
+    /** @return the raw argument vector (for AOF propagation; do not mutate) */
+    public byte[][] args() {
+        return args;
+    }
+
     /**
      * Returns the raw bytes of an argument.
      *

@@ -1,5 +1,6 @@
 package dev.jediscore.server;
 
+import dev.jediscore.engine.PersistenceConfig;
 import dev.jediscore.engine.ServerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,11 +39,13 @@ public final class JediCoreServer {
         System.out.print(banner());
 
         ServerConfig config = parseConfig(args);
+        PersistenceConfig persistenceConfig = parsePersistenceConfig(args);
         log.info("JediCore {} starting (RESP2/RESP3, single command thread)", VERSION);
         log.info("  java.version = {}", System.getProperty("java.version"));
         log.info("  run_id       = {}", config.runId());
+        log.info("  dir          = {}  appendonly = {}", persistenceConfig.dir(), persistenceConfig.appendOnly());
 
-        JediCore jediCore = JediCore.start(config);
+        JediCore jediCore = JediCore.start(config, persistenceConfig);
         log.info("Ready to accept connections tcp on {}:{}", config.host(), jediCore.port());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -62,17 +65,54 @@ public final class JediCoreServer {
     static ServerConfig parseConfig(String[] args) {
         String host = DEFAULT_HOST;
         int port = DEFAULT_PORT;
-        if (args.length >= 1 && !args[0].isBlank()) {
-            String arg = args[0];
-            int colon = arg.lastIndexOf(':');
+        String address = firstPositional(args);
+        if (address != null && !address.isBlank()) {
+            int colon = address.lastIndexOf(':');
             if (colon >= 0) {
-                host = arg.substring(0, colon);
-                port = Integer.parseInt(arg.substring(colon + 1));
+                host = address.substring(0, colon);
+                port = Integer.parseInt(address.substring(colon + 1));
             } else {
-                port = Integer.parseInt(arg);
+                port = Integer.parseInt(address);
             }
         }
         return ServerConfig.defaults(host, port);
+    }
+
+    /**
+     * Parses persistence flags: {@code --dir}, {@code --appendonly yes|no},
+     * {@code --appendfsync always|everysec|no}.
+     *
+     * @param args the command-line arguments
+     * @return the persistence configuration
+     */
+    static PersistenceConfig parsePersistenceConfig(String[] args) {
+        PersistenceConfig config = PersistenceConfig.defaults().withDir(flag(args, "--dir", "."));
+        if ("yes".equalsIgnoreCase(flag(args, "--appendonly", "no"))) {
+            config = config.withAppendOnly(flag(args, "--appendfsync", "everysec"));
+        }
+        return config;
+    }
+
+    /** Returns the first non-flag argument (the address), or {@code null}. */
+    private static String firstPositional(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].startsWith("--")) {
+                i++; // skip the flag's value
+            } else {
+                return args[i];
+            }
+        }
+        return null;
+    }
+
+    /** Returns the value following {@code name}, or {@code fallback} if absent. */
+    private static String flag(String[] args, String name, String fallback) {
+        for (int i = 0; i + 1 < args.length; i++) {
+            if (args[i].equals(name)) {
+                return args[i + 1];
+            }
+        }
+        return fallback;
     }
 
     /**

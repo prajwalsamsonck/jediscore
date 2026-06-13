@@ -8,12 +8,15 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 4A complete — **RDB persistence** that is cross-compatible
-> with real `redis-server` both ways (CRC-64, all type encodings incl.
-> listpack/intset/quicklist + LZF), with a fork-free `BGSAVE` snapshot,
-> `SAVE`/`LASTSAVE`/`DEBUG RELOAD`, save points, and startup load — on top of all
-> five data types, the `SCAN` family, two-tier expiration, memory accounting, and
-> `maxmemory` eviction. Next: AOF (4B), then replication, pub/sub, transactions.
+> **Status:** Phase 4B complete — **AOF persistence**: the Redis 7 multi-part
+> layout (`base.rdb` + `incr.aof` + `manifest`), all three `appendfsync` policies
+> (`always`/`everysec`/`no`), a fork-free `BGREWRITEAOF`, and manifest-driven
+> startup replay (crash-consistency verified under a hard kill). On top of Phase 4A
+> **RDB persistence** — cross-compatible with real `redis-server` both ways (CRC-64,
+> all type encodings incl. listpack/intset/quicklist + LZF), fork-free `BGSAVE`,
+> `SAVE`/`LASTSAVE`/`DEBUG RELOAD`, save points — plus all five data types, the
+> `SCAN` family, two-tier expiration, memory accounting, and `maxmemory` eviction.
+> Next: replication, pub/sub, transactions.
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text

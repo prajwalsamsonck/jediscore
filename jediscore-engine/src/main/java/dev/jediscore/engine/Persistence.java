@@ -38,12 +38,38 @@ public interface Persistence {
      */
     void reload();
 
-    /** Loads the on-disk RDB into the keyspace at startup, if a file exists. */
+    /**
+     * Loads persisted data at startup: the AOF (if enabled) takes precedence over
+     * the RDB; otherwise the RDB is loaded if present.
+     */
     void loadOnStartup();
 
-    /** Invoked on every cron tick (command thread) to evaluate RDB save points. */
+    /** Invoked on every cron tick (command thread): RDB save points and AOF everysec fsync. */
     void onCron();
 
-    /** Stops background workers. */
+    /** @return whether AOF is enabled */
+    boolean appendOnlyEnabled();
+
+    /**
+     * Appends a write command to the AOF (no-op if AOF is disabled or during load).
+     *
+     * @param database the database the command targeted
+     * @param args     the command argument vector
+     */
+    void feedAppendOnly(int database, byte[][] args);
+
+    /**
+     * Starts an AOF rewrite (compaction): a fresh base capturing current state plus
+     * a new, empty incr file.
+     *
+     * @return {@code true} if a rewrite was started, {@code false} if one is running
+     *         or AOF is disabled
+     */
+    boolean rewriteAppendOnly();
+
+    /** @return whether an AOF rewrite is currently running */
+    boolean appendRewriteInProgress();
+
+    /** Stops background workers and flushes/closes the AOF. */
     void shutdown();
 }
