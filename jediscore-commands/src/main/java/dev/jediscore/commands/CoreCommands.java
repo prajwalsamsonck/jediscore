@@ -40,5 +40,6 @@ public final class CoreCommands {
         ListCommands.registerAll(registry);
         SetCommands.registerAll(registry);
         ZSetCommands.registerAll(registry);
+        ScanCommands.registerAll(registry);
     }
 }

@@ -1,32 +1,33 @@
 package dev.jediscore.engine;
 
 import dev.jediscore.datastructures.Bytes;
+import dev.jediscore.datastructures.Dict;
 import dev.jediscore.datastructures.RedisValue;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.BiConsumer;
 import java.util.function.LongSupplier;
 
 /**
  * A single logical Redis database (keyspace): the key → value dictionary plus a
  * parallel table of per-key expiration times.
  *
- * <p><strong>Threading.</strong> A {@code Database} is only ever touched by the
- * single command thread, so it uses plain {@link HashMap}s with no locking.
+ * <p>The key dictionary is a {@link Dict} (not a {@code HashMap}) specifically so
+ * that {@code SCAN} can iterate it with Redis's bucket cursor; the expiry table,
+ * which is never scanned, remains a plain {@link HashMap}.
  *
- * <p><strong>Expiration.</strong> Phase 2 implements <em>lazy</em> expiration:
- * an expired key is detected and removed the next time it is accessed, exactly
- * the cheap half of Redis's strategy. (Active/background sampling is added later;
- * it is a performance optimisation, not a correctness requirement — lazy
- * expiration alone already makes reads and writes observe correct values.)
+ * <p><strong>Threading.</strong> Only ever touched by the single command thread,
+ * so no locking. <strong>Expiration</strong> is lazy: an expired key is removed
+ * the next time it is accessed (and {@code KEYS}/{@code DBSIZE} purge as they scan).
  */
 public final class Database {
 
     private final int index;
     private final LongSupplier clock;
-    private final Map<Bytes, RedisValue> dict = new HashMap<>();
+    private final Dict<RedisValue> dict = new Dict<>();
     private final Map<Bytes, Long> expires = new HashMap<>();
 
     /**
@@ -46,8 +47,7 @@ public final class Database {
     }
 
     /**
-     * Looks up a key, honouring expiration. If the key has expired it is removed
-     * and {@code null} is returned. Records an access on the value for idle-time
+     * Looks up a key, honouring expiration, and records an access for idle-time
      * tracking.
      *
      * @param key the key
@@ -65,8 +65,7 @@ public final class Database {
     }
 
     /**
-     * Like {@link #lookup} but does not update the access time — used by commands
-     * such as {@code OBJECT} that must observe, not touch, the value.
+     * Like {@link #lookup} but does not update the access time.
      *
      * @param key the key
      * @return the live value, or {@code null}
@@ -79,8 +78,7 @@ public final class Database {
     }
 
     /**
-     * Stores a value, clearing any existing TTL (a plain {@code SET}-style write
-     * removes the previous expiration, matching Redis).
+     * Stores a value, clearing any existing TTL.
      *
      * @param key   the key
      * @param value the value
@@ -91,8 +89,7 @@ public final class Database {
     }
 
     /**
-     * Stores a value while preserving any existing TTL (for in-place mutations
-     * such as {@code APPEND} or {@code HSET} that must keep the key's TTL).
+     * Stores a value while preserving any existing TTL.
      *
      * @param key   the key
      * @param value the value
@@ -122,7 +119,7 @@ public final class Database {
         return peek(key) != null;
     }
 
-    /** @return the number of live keys (lazily; expired keys may still be counted until accessed) */
+    /** @return the number of live keys (lazily; expired-but-unaccessed keys may be counted) */
     public int size() {
         return dict.size();
     }
@@ -133,12 +130,24 @@ public final class Database {
         expires.clear();
     }
 
+    /**
+     * Advances a {@code SCAN} cursor over the keyspace.
+     *
+     * @param cursor   the cursor (0 to start)
+     * @param count    buckets to visit this call
+     * @param consumer receives each visited key and its value
+     * @return the next cursor (0 when complete)
+     */
+    public long scan(long cursor, int count, BiConsumer<Bytes, RedisValue> consumer) {
+        return dict.scan(cursor, count, consumer);
+    }
+
     // ---- Expiration ---------------------------------------------------------
 
     /**
      * Sets an absolute expiration time.
      *
-     * @param key            the key (must exist)
+     * @param key        the key (must exist)
      * @param whenMillis the absolute expiry time in epoch milliseconds
      */
     public void setExpireAt(Bytes key, long whenMillis) {
@@ -156,7 +165,7 @@ public final class Database {
     }
 
     /**
-     * Clears a key's TTL, making it persistent.
+     * Clears a key's TTL.
      *
      * @param key the key
      * @return {@code true} if a TTL was removed
@@ -177,7 +186,7 @@ public final class Database {
         long now = clock.getAsLong();
         List<Bytes> keys = new ArrayList<>(dict.size());
         List<Bytes> expired = null;
-        for (Bytes key : dict.keySet()) {
+        for (Bytes key : dict.keys()) {
             Long when = expires.get(key);
             if (when != null && when <= now) {
                 if (expired == null) {
@@ -198,28 +207,20 @@ public final class Database {
     }
 
     /**
-     * Returns a uniformly random live key, or {@code null} if the database is
-     * empty.
+     * Returns a uniformly random live key, or {@code null} if empty.
      *
      * @return a random key, or {@code null}
      */
     public Bytes randomKey() {
-        int size = dict.size();
-        if (size == 0) {
+        List<Bytes> keys = dict.keys();
+        if (keys.isEmpty()) {
             return null;
         }
-        int target = ThreadLocalRandom.current().nextInt(size);
-        int i = 0;
-        for (Bytes key : dict.keySet()) {
-            if (i++ == target) {
-                if (expireIfNeeded(key)) {
-                    // Rare: hit an expired key; fall back to a fresh scan.
-                    return randomKey();
-                }
-                return key;
-            }
+        Bytes key = keys.get(ThreadLocalRandom.current().nextInt(keys.size()));
+        if (expireIfNeeded(key)) {
+            return randomKey();
         }
-        return null;
+        return key;
     }
 
     private boolean expireIfNeeded(Bytes key) {

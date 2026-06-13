@@ -16,6 +16,7 @@ document, updated every phase as commands are implemented.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
+| Cursor iteration (`SCAN` family) | ✅ Done | Custom `Dict` with Redis's reverse-binary bucket cursor; full iteration is complete under modification/resize. |
 | RESP2 | ✅ Done | Default dialect; full encode/decode. |
 | RESP3 | ✅ Done | Negotiated via `HELLO 3`; all typed replies supported. |
 | Inline commands | ✅ Done | Whitespace split with single/double-quote and escape handling. |
@@ -56,9 +57,9 @@ document, updated every phase as commands are implemented.
 | `DBSIZE` | ✅ Done | Excludes logically-expired keys. |
 | `FLUSHDB` / `FLUSHALL` | ✅ Done | `ASYNC`/`SYNC` accepted (flushing is synchronous). |
 | `OBJECT ENCODING/REFCOUNT/IDLETIME` | 🚧 Partial | REFCOUNT always 1 (no object sharing). |
-| `EXPIRE`/`TTL`/`PERSIST` family | 📋 Planned | TTL infra exists (SET EX, GETEX); commands land in a later phase. |
-| `SCAN` | 📋 Planned | With the SCAN cursor family. |
-| `SWAPDB` | 📋 Planned | |
+| `EXPIRE`/`TTL`/`PERSIST` family | ✅ Done | NX/XX/GT/LT; EXPIRETIME/PEXPIRETIME. |
+| `SCAN` | ✅ Done | `MATCH`/`COUNT`/`TYPE`; reverse-binary bucket cursor. |
+| `SWAPDB` | ✅ Done | |
 
 ### Strings
 
@@ -81,7 +82,7 @@ document, updated every phase as commands are implemented.
 | `HINCRBY` | ✅ Done | Validates before creating the key. |
 | `HINCRBYFLOAT` | 🚧 Partial | Same double caveat as `INCRBYFLOAT`. |
 | `HRANDFIELD` | 🚧 Partial | `WITHVALUES` returns a flat array (RESP3 nesting deferred). |
-| `HSCAN` | 📋 Planned | With the SCAN cursor family. |
+| `HSCAN` | ✅ Done | `MATCH`/`COUNT`/`NOVALUES`. |
 
 ### Lists
 
@@ -104,7 +105,7 @@ document, updated every phase as commands are implemented.
 | `SUNION` `SINTER` `SDIFF` (+ `STORE`) | ✅ Done | |
 | `SINTERCARD` | ✅ Done | `LIMIT` option. |
 | `SMOVE` | ✅ Done | Redis argument/lookup ordering. |
-| `SSCAN` | 📋 Planned | With the SCAN cursor family. |
+| `SSCAN` | ✅ Done | `MATCH`/`COUNT`. |
 
 ### Sorted sets
 
@@ -120,7 +121,7 @@ document, updated every phase as commands are implemented.
 | `ZRANGESTORE` | ✅ Done | |
 | `ZUNION` `ZINTER` `ZDIFF` (+ `STORE`) | ✅ Done | `WEIGHTS`/`AGGREGATE`; accepts sets as inputs (score 1). |
 | `ZINTERCARD` | ✅ Done | `LIMIT`. |
-| `ZSCAN` | 📋 Planned | With the SCAN cursor family. |
+| `ZSCAN` | ✅ Done | `MATCH`/`COUNT`; returns member/score pairs. |
 
 ### Expiration
 
@@ -130,7 +131,6 @@ document, updated every phase as commands are implemented.
 | `TTL` `PTTL` `EXPIRETIME` `PEXPIRETIME` | ✅ Done | |
 | `PERSIST` | ✅ Done | |
 | `SWAPDB` | ✅ Done | |
-| `SCAN` | 📋 Planned | Cursor family (with `HSCAN`/`SSCAN`/`ZSCAN`). |
 
 <!--
   Maintenance: as each command lands, add a row above with its status and any

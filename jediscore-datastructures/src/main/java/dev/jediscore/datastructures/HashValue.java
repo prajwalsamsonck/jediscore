@@ -1,24 +1,19 @@
 package dev.jediscore.datastructures;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.function.BiConsumer;
 
 /**
- * A Redis hash: an ordered map of binary field → binary value.
+ * A Redis hash: a map of binary field → binary value.
  *
  * <p><strong>Encoding.</strong> It starts {@code listpack}-encoded (field/value
  * pairs packed into one {@link Listpack}) and converts to a {@code hashtable}
- * once it exceeds {@code hash-max-listpack-entries} pairs or any field/value
- * exceeds {@code hash-max-listpack-value} bytes — the same dual encoding Redis
- * uses. Conversion is one-way (Redis never shrinks back), so {@code OBJECT
- * ENCODING} is stable once it reports {@code hashtable}.
- *
- * <p>Insertion order is preserved in both encodings (the hashtable form uses a
- * {@link LinkedHashMap}); callers that compare against real Redis must not rely
- * on field order for the {@code hashtable} encoding, where Redis's order is
- * unspecified.
+ * (a {@link Dict}) once it exceeds {@code hash-max-listpack-entries} pairs or any
+ * field/value exceeds {@code hash-max-listpack-value} bytes. Conversion is
+ * one-way. The hashtable form uses {@link Dict} so {@code HSCAN} can iterate it
+ * with the bucket cursor; iteration order in that encoding is unspecified, as in
+ * Redis.
  */
 public final class HashValue extends RedisValue {
 
@@ -27,7 +22,7 @@ public final class HashValue extends RedisValue {
 
     // Exactly one of these is non-null at any time.
     private Listpack listpack;
-    private LinkedHashMap<Bytes, byte[]> table;
+    private Dict<byte[]> table;
 
     /**
      * Creates an empty, listpack-encoded hash.
@@ -75,8 +70,7 @@ public final class HashValue extends RedisValue {
      *
      * @param field the field
      * @param value the value
-     * @return {@code true} if the field was newly created, {@code false} if it
-     *         already existed and was overwritten
+     * @return {@code true} if the field was newly created
      */
     public boolean put(byte[] field, byte[] value) {
         if (listpack != null) {
@@ -87,8 +81,7 @@ public final class HashValue extends RedisValue {
             }
             if (shouldConvert(field.length, value.length, 1)) {
                 convertToTable();
-                table.put(new Bytes(field.clone()), value.clone());
-                return true;
+                return table.put(new Bytes(field.clone()), value.clone()) == null;
             }
             listpack.add(field);
             listpack.add(value);
@@ -109,8 +102,8 @@ public final class HashValue extends RedisValue {
             if (idx < 0) {
                 return false;
             }
-            listpack.removeAt(idx + 1); // value
-            listpack.removeAt(idx);     // field
+            listpack.removeAt(idx + 1);
+            listpack.removeAt(idx);
             return true;
         }
         return table.remove(new Bytes(field)) != null;
@@ -129,7 +122,7 @@ public final class HashValue extends RedisValue {
         return table.containsKey(new Bytes(field));
     }
 
-    /** @return the fields, in iteration order, as fresh byte arrays */
+    /** @return the fields as fresh byte arrays */
     public List<byte[]> fields() {
         List<byte[]> out = new ArrayList<>(size());
         if (listpack != null) {
@@ -138,14 +131,14 @@ public final class HashValue extends RedisValue {
                 out.add(all.get(i));
             }
         } else {
-            for (Bytes k : table.keySet()) {
+            for (Bytes k : table.keys()) {
                 out.add(k.copy());
             }
         }
         return out;
     }
 
-    /** @return the values, in iteration order, as fresh byte arrays */
+    /** @return the values as fresh byte arrays */
     public List<byte[]> values() {
         List<byte[]> out = new ArrayList<>(size());
         if (listpack != null) {
@@ -167,10 +160,10 @@ public final class HashValue extends RedisValue {
             return listpack.toList();
         }
         List<byte[]> out = new ArrayList<>(table.size() * 2);
-        for (Map.Entry<Bytes, byte[]> e : table.entrySet()) {
-            out.add(e.getKey().copy());
-            out.add(e.getValue().clone());
-        }
+        table.forEach((k, v) -> {
+            out.add(k.copy());
+            out.add(v.clone());
+        });
         return out;
     }
 
@@ -183,6 +176,27 @@ public final class HashValue extends RedisValue {
     public int valueLength(byte[] field) {
         byte[] v = get(field);
         return v == null ? 0 : v.length;
+    }
+
+    /**
+     * Advances an {@code HSCAN} cursor. For the listpack encoding all pairs are
+     * emitted at once and 0 is returned; for the hashtable encoding the bucket
+     * cursor is used.
+     *
+     * @param cursor   the cursor
+     * @param count    buckets to visit this call
+     * @param consumer receives each field and value
+     * @return the next cursor (0 when complete)
+     */
+    public long scan(long cursor, int count, BiConsumer<byte[], byte[]> consumer) {
+        if (listpack != null) {
+            List<byte[]> flat = listpack.toList();
+            for (int i = 0; i < flat.size(); i += 2) {
+                consumer.accept(flat.get(i), flat.get(i + 1));
+            }
+            return 0;
+        }
+        return table.scan(cursor, count, (k, v) -> consumer.accept(k.array(), v));
     }
 
     @Override
@@ -202,7 +216,7 @@ public final class HashValue extends RedisValue {
     }
 
     private void convertToTable() {
-        LinkedHashMap<Bytes, byte[]> t = new LinkedHashMap<>();
+        Dict<byte[]> t = new Dict<>();
         List<byte[]> flat = listpack.toList();
         for (int i = 0; i < flat.size(); i += 2) {
             t.put(new Bytes(flat.get(i)), flat.get(i + 1));

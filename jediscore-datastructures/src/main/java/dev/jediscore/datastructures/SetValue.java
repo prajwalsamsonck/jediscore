@@ -2,24 +2,18 @@ package dev.jediscore.datastructures;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 
 /**
  * A Redis set: an unordered collection of unique binary members.
  *
- * <p><strong>Encoding (three-way, like Redis).</strong>
- * <ul>
- *   <li>{@code intset} — every member is an integer and the count is within
- *       {@code set-max-intset-entries}; stored as a sorted {@link IntSet}.</li>
- *   <li>{@code listpack} — small and not all-integer; stored in a {@link Listpack}.</li>
- *   <li>{@code hashtable} — anything larger; stored in a {@link LinkedHashSet}.</li>
- * </ul>
- * A set begins as an (empty) intset and migrates as members are added: an intset
- * that gains a non-integer member, or grows past its limit, becomes a listpack
- * or hashtable; a listpack that grows past its limit becomes a hashtable.
- * Conversions are one-way.
+ * <p><strong>Encoding (three-way).</strong> {@code intset} (all-integer, sorted
+ * {@link IntSet}), {@code listpack} (small, mixed), or {@code hashtable} (a
+ * {@link Dict}). A set begins as an empty intset and migrates one-way as members
+ * are added. The hashtable form uses {@link Dict} so {@code SSCAN} can iterate it
+ * with the bucket cursor.
  */
 public final class SetValue extends RedisValue {
 
@@ -29,7 +23,7 @@ public final class SetValue extends RedisValue {
 
     private IntSet intset = new IntSet();
     private Listpack listpack;
-    private LinkedHashSet<Bytes> table;
+    private Dict<Boolean> table;
 
     /**
      * Creates an empty set.
@@ -84,7 +78,6 @@ public final class SetValue extends RedisValue {
                 }
                 return intset.add(asLong);
             }
-            // A non-integer member forces the intset to a richer encoding.
             migrateFromIntset(member.length);
             return addToListpackOrTable(member);
         }
@@ -110,7 +103,7 @@ public final class SetValue extends RedisValue {
             listpack.removeAt(idx);
             return true;
         }
-        return table.remove(new Bytes(member));
+        return table.remove(new Bytes(member)) != null;
     }
 
     /**
@@ -125,7 +118,7 @@ public final class SetValue extends RedisValue {
         if (listpack != null) {
             return listpack.indexOf(member, 0, 1) >= 0;
         }
-        return table.contains(new Bytes(member));
+        return table.containsKey(new Bytes(member));
     }
 
     /** @return all members as fresh byte arrays */
@@ -138,7 +131,7 @@ public final class SetValue extends RedisValue {
         } else if (listpack != null) {
             out.addAll(listpack.toList());
         } else {
-            for (Bytes b : table) {
+            for (Bytes b : table.keys()) {
                 out.add(b.copy());
             }
         }
@@ -168,10 +161,28 @@ public final class SetValue extends RedisValue {
         if (n == 0) {
             return null;
         }
-        int idx = ThreadLocalRandom.current().nextInt(n);
-        byte[] member = memberAt(idx);
+        byte[] member = memberAt(ThreadLocalRandom.current().nextInt(n));
         remove(member);
         return member;
+    }
+
+    /**
+     * Advances an {@code SSCAN} cursor. The compact encodings emit all members at
+     * once (returning 0); the hashtable encoding uses the bucket cursor.
+     *
+     * @param cursor   the cursor
+     * @param count    buckets to visit this call
+     * @param consumer receives each member
+     * @return the next cursor (0 when complete)
+     */
+    public long scan(long cursor, int count, Consumer<byte[]> consumer) {
+        if (table == null) {
+            for (byte[] m : members()) {
+                consumer.accept(m);
+            }
+            return 0;
+        }
+        return table.scan(cursor, count, (k, v) -> consumer.accept(k.array()));
     }
 
     @Override
@@ -191,7 +202,7 @@ public final class SetValue extends RedisValue {
             return listpack.get(index);
         }
         int i = 0;
-        for (Bytes b : table) {
+        for (Bytes b : table.keys()) {
             if (i++ == index) {
                 return b.copy();
             }
@@ -206,18 +217,14 @@ public final class SetValue extends RedisValue {
             }
             if (listpack.count() + 1 > maxListpack || member.length > maxValue) {
                 convertListpackToTable();
-                return table.add(new Bytes(member.clone()));
+                return table.put(new Bytes(member.clone()), Boolean.TRUE) == null;
             }
             listpack.add(member);
             return true;
         }
-        return table.add(new Bytes(member.clone()));
+        return table.put(new Bytes(member.clone()), Boolean.TRUE) == null;
     }
 
-    /**
-     * Migrates an intset to a listpack (if the result still fits) or a hashtable,
-     * carrying the existing integer members across as their decimal text.
-     */
     private void migrateFromIntset(int newMemberLength) {
         boolean toListpack = (intset.size() + 1 <= maxListpack) && (newMemberLength <= maxValue);
         if (toListpack) {
@@ -226,18 +233,19 @@ public final class SetValue extends RedisValue {
                 listpack.add(Long.toString(intset.get(i)).getBytes(StandardCharsets.US_ASCII));
             }
         } else {
-            table = new LinkedHashSet<>();
+            table = new Dict<>();
             for (int i = 0; i < intset.size(); i++) {
-                table.add(new Bytes(Long.toString(intset.get(i)).getBytes(StandardCharsets.US_ASCII)));
+                table.put(new Bytes(Long.toString(intset.get(i)).getBytes(StandardCharsets.US_ASCII)),
+                        Boolean.TRUE);
             }
         }
         intset = null;
     }
 
     private void convertListpackToTable() {
-        table = new LinkedHashSet<>();
+        table = new Dict<>();
         for (byte[] e : listpack.toList()) {
-            table.add(new Bytes(e));
+            table.put(new Bytes(e), Boolean.TRUE);
         }
         listpack = null;
     }

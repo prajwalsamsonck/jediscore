@@ -1,8 +1,8 @@
 package dev.jediscore.datastructures;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 /**
  * A Redis sorted set: members ordered by score, with O(1) member→score lookup.
@@ -26,7 +26,7 @@ public final class ZSetValue extends RedisValue {
     // listpack encoding: pairs [member0, score0, member1, score1, …] sorted by (score, member).
     private Listpack listpack;
     // skiplist encoding:
-    private HashMap<Bytes, Double> dict;
+    private Dict<Double> dict;
     private SkipList index;
 
     /**
@@ -198,6 +198,27 @@ public final class ZSetValue extends RedisValue {
         return pop(size() - 1);
     }
 
+    /**
+     * Advances a {@code ZSCAN} cursor. The listpack encoding emits all members at
+     * once (returning 0); the skiplist encoding scans the member→score dict with
+     * the bucket cursor.
+     *
+     * @param cursor   the cursor
+     * @param count    buckets to visit this call
+     * @param consumer receives each member and its score
+     * @return the next cursor (0 when complete)
+     */
+    public long scan(long cursor, int count, BiConsumer<byte[], Double> consumer) {
+        if (listpack != null) {
+            List<byte[]> flat = listpack.toList();
+            for (int i = 0; i < flat.size(); i += 2) {
+                consumer.accept(flat.get(i), bytesToScore(flat.get(i + 1)));
+            }
+            return 0;
+        }
+        return dict.scan(cursor, count, (k, v) -> consumer.accept(k.array(), v));
+    }
+
     @Override
     public ZSetValue deepCopy() {
         ZSetValue copy = new ZSetValue(maxListpackEntries, maxValue);
@@ -275,7 +296,7 @@ public final class ZSetValue extends RedisValue {
     }
 
     private void convertToSkiplist() {
-        dict = new HashMap<>();
+        dict = new Dict<>();
         index = new SkipList();
         List<byte[]> flat = listpack.toList();
         for (int i = 0; i < flat.size(); i += 2) {

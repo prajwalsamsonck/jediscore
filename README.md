@@ -8,12 +8,12 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 2C — all five data types are implemented with full command
-> coverage: strings, hashes, lists, sets, and **sorted sets** (a self-implemented
-> skiplist + hashmap), plus the `EXPIRE`/`TTL` family and `SWAPDB`. Everything is
-> validated by a jqwik differential test against real Redis. The `SCAN` cursor
-> family is the remaining piece. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the
-> design and [`COMPATIBILITY.md`](COMPATIBILITY.md) for the command matrix.
+> **Status:** Phase 2 complete — all five data types (strings, hashes, lists,
+> sets, sorted sets), the keyspace with the `EXPIRE`/`TTL` family, `SWAPDB`, and
+> the cursor-based `SCAN`/`HSCAN`/`SSCAN`/`ZSCAN` family (a custom hash table with
+> Redis's reverse-binary cursor). All validated by a jqwik differential test
+> against real Redis. Next up: persistence, replication, pub/sub, transactions.
+> See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text
 $ redis-cli -p 6379 PING

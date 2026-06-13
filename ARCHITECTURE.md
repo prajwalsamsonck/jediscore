@@ -213,6 +213,27 @@ Redis from `-Djedicore.diff.redis=host:port` or Testcontainers (CI).
 
 ## Changelog
 
+### Phase 2D — the SCAN cursor family
+- **`Dict`**: a custom chained hash table (power-of-two buckets, synchronous
+  grow-only resize) implementing Redis's **reverse-binary `SCAN` cursor**. A full
+  iteration returns every element present throughout, even across resizes and
+  modifications between calls — the guarantee `java.util.HashMap` can't give
+  because it doesn't expose buckets. A unit test asserts this completeness while
+  the table doubles mid-scan.
+- **Migrated to `Dict`**: the keyspace (`Database`), and the hashtable encodings
+  of `HashValue`, `SetValue`, and `ZSetValue`. The existing differential test
+  (re-run vs Redis 7.4) confirms behaviour is unchanged by the refactor.
+- **Commands**: `SCAN` (`MATCH`/`COUNT`/`TYPE`), `HSCAN` (`MATCH`/`COUNT`/
+  `NOVALUES`), `SSCAN`, `ZSCAN`. Compact encodings (listpack/intset) are returned
+  whole at cursor 0, as in Redis. SCAN correctness is verified by dedicated
+  full-iteration completeness tests (cursors are implementation-specific, so they
+  are not diffed against Redis cursor-by-cursor).
+- **Benchmark** (`ScanBenchmark`): a full scan of 10,000 keys in ~235 µs
+  (4.25 full-scans/ms; ~42M keys/s).
+- **All five data types and keyspace introspection are now complete.** Next:
+  Phase 3 — persistence (the fork-free design), then replication, pub/sub, and
+  transactions.
+
 ### Phase 2C — sorted sets, expiration, SWAPDB
 - **Skiplist**: `SkipList` is a faithful port of Redis's `zskiplist` (per-level
   forward pointers with spans for O(log n) rank). It implements a `SortedIndex`
