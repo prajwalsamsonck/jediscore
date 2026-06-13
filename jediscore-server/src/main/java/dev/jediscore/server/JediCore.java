@@ -3,10 +3,13 @@ package dev.jediscore.server;
 import dev.jediscore.commands.CoreCommands;
 import dev.jediscore.engine.CommandExecutor;
 import dev.jediscore.engine.CommandRegistry;
+import dev.jediscore.engine.Persistence;
+import dev.jediscore.engine.PersistenceConfig;
 import dev.jediscore.engine.ServerConfig;
 import dev.jediscore.engine.ServerContext;
 import dev.jediscore.engine.ServerCron;
 import dev.jediscore.network.RespServer;
+import dev.jediscore.persistence.RdbPersistence;
 
 /**
  * The composition root: wires the engine, commands, and network layer into a
@@ -24,25 +27,40 @@ public final class JediCore implements AutoCloseable {
     private final RespServer server;
     private final CommandExecutor executor;
     private final ServerCron cron;
+    private final Persistence persistence;
     private final int port;
 
     private JediCore(ServerContext context, RespServer server, CommandExecutor executor,
-                     ServerCron cron, int port) {
+                     ServerCron cron, Persistence persistence, int port) {
         this.context = context;
         this.server = server;
         this.executor = executor;
         this.cron = cron;
+        this.persistence = persistence;
         this.port = port;
     }
 
     /**
-     * Builds and starts a server from the given configuration.
+     * Builds and starts a server with default (RDB-only) persistence.
      *
      * @param config the server configuration
      * @return a running server handle
      * @throws InterruptedException if interrupted while binding the socket
      */
     public static JediCore start(ServerConfig config) throws InterruptedException {
+        return start(config, PersistenceConfig.defaults());
+    }
+
+    /**
+     * Builds and starts a server with explicit persistence configuration.
+     *
+     * @param config            the server configuration
+     * @param persistenceConfig the persistence configuration (dir, save points, …)
+     * @return a running server handle
+     * @throws InterruptedException if interrupted while binding the socket
+     */
+    public static JediCore start(ServerConfig config, PersistenceConfig persistenceConfig)
+            throws InterruptedException {
         CommandRegistry registry = new CommandRegistry();
         CoreCommands.registerAll(registry);
 
@@ -52,14 +70,19 @@ public final class JediCore implements AutoCloseable {
         CommandExecutor executor = new CommandExecutor("jedicore-cmd");
         ServerContext context = new ServerContext(config, registry, executor);
 
+        // Wire persistence and load any existing dataset before accepting clients.
+        RdbPersistence persistence = new RdbPersistence(context, persistenceConfig);
+        context.setPersistence(persistence);
+        persistence.loadOnStartup();
+
         RespServer server = new RespServer(context);
         int boundPort = server.start();
 
-        // Start background maintenance (active expiration; eviction housekeeping).
+        // Start background maintenance (active expiration, save-point checks).
         ServerCron cron = new ServerCron(context);
         cron.start();
 
-        return new JediCore(context, server, executor, cron, boundPort);
+        return new JediCore(context, server, executor, cron, persistence, boundPort);
     }
 
     /** @return the bound TCP port */
@@ -82,11 +105,12 @@ public final class JediCore implements AutoCloseable {
         server.awaitShutdown();
     }
 
-    /** Stops background maintenance, then the network server, then the command loop. */
+    /** Stops background maintenance, the network server, persistence, then the command loop. */
     @Override
     public void close() {
         cron.close();
         server.close();
+        persistence.shutdown();
         executor.close();
     }
 }

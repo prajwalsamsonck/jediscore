@@ -63,6 +63,19 @@ document, updated every phase as commands are implemented.
 | `SCAN` | ✅ Done | `MATCH`/`COUNT`/`TYPE`; reverse-binary bucket cursor. |
 | `SWAPDB` | ✅ Done | |
 
+### Persistence
+
+| Command / feature | Status | Notes |
+|---------|--------|-------|
+| `SAVE` | ✅ Done | Synchronous RDB write (blocks the command thread). |
+| `BGSAVE` | ✅ Done | Fork-free: deep-copy snapshot on the command thread, serialize off-thread. |
+| `LASTSAVE` | ✅ Done | |
+| `DEBUG RELOAD` | ✅ Done | Save + flush + reload, round-tripping through RDB. |
+| RDB file format | ✅ Done | Cross-compatible with `redis-server` both ways: writes plain encodings (CRC-64 verified by Redis); reads Redis 7.x encodings (intset, listpack, quicklist v2, int-encoded + LZF strings). |
+| RDB save points | ✅ Done | `save 900 1 …`; auto-BGSAVE on the cron. |
+| Startup load | ✅ Done | Loads `dump.rdb` from `dir` if present. |
+| AOF (`BGREWRITEAOF`, appendonly, multi-part) | 📋 Planned | Phase 4B. |
+
 ### Strings
 
 | Command | Status | Notes |

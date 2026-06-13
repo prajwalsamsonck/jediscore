@@ -8,13 +8,13 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 3 complete — on top of all five data types and the `SCAN`
-> family, the keyspace now has two-tier (lazy + active) expiration, approximate
-> memory accounting (`MEMORY USAGE`/`DOCTOR`), clock-based LFU/LRU object metadata
-> (`OBJECT FREQ`/`IDLETIME`), and `maxmemory` eviction with all 8 policies. All
-> validated by a jqwik differential test against real Redis. Next up: persistence,
-> replication, pub/sub, transactions. See [`ARCHITECTURE.md`](ARCHITECTURE.md) and
-> [`COMPATIBILITY.md`](COMPATIBILITY.md).
+> **Status:** Phase 4A complete — **RDB persistence** that is cross-compatible
+> with real `redis-server` both ways (CRC-64, all type encodings incl.
+> listpack/intset/quicklist + LZF), with a fork-free `BGSAVE` snapshot,
+> `SAVE`/`LASTSAVE`/`DEBUG RELOAD`, save points, and startup load — on top of all
+> five data types, the `SCAN` family, two-tier expiration, memory accounting, and
+> `maxmemory` eviction. Next: AOF (4B), then replication, pub/sub, transactions.
+> See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text
 $ redis-cli -p 6379 PING

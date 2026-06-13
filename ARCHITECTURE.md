@@ -277,7 +277,75 @@ uses the simpler per-call sampling (documented). Memory enforcement is exact for
 whole-key writes (which the eviction tests drive via `SET`) and approximate under
 in-place growth.
 
+## Persistence — RDB (Phase 4A)
+
+### The fork-free snapshot (and its pause)
+
+Real Redis `BGSAVE` calls `fork()`: the child inherits a copy-on-write view of
+memory and serializes it while the parent serves, so the only pause is the
+`fork()` itself (O(page-table size), ~ms). **The JVM cannot `fork()`**, so:
+
+- **`SAVE`** serializes synchronously on the command thread (it already holds the
+  thread; a reference snapshot is enough).
+- **`BGSAVE`** takes a **consistent deep-copy snapshot** of the keyspace on the
+  command thread (the stop-the-world pause), then a background thread serializes
+  that immutable snapshot while the command thread resumes serving.
+
+```mermaid
+sequenceDiagram
+    participant Cmd as Command thread
+    participant Bg as bgsave thread
+    Cmd->>Cmd: BGSAVE: deep-copy keyspace (PAUSE, O(dataset))
+    Cmd->>Bg: hand over immutable snapshot
+    Cmd->>Cmd: resume serving commands
+    Bg->>Bg: serialize snapshot → temp file
+    Bg->>Bg: atomic rename → dump.rdb
+```
+
+**Pause characteristic (honest).** The pause is **O(dataset size)** — the time to
+deep-copy every value — not O(page tables) as with `fork()`. Measured ≈ **0.81 ms
+for 10,000 keys**, so roughly ~80 ms at 1M keys: larger than Redis's fork, and
+the price of lacking COW fork. A true mutation-time COW scheme would shrink it but
+needs to intercept every in-place mutation; that is deferred. `SAVE` avoids the
+copy but blocks the whole time it serializes.
+
+### RDB format & cross-compatibility
+
+JediCore is wire-compatible with `redis-server` in both directions (proven against
+Redis 7.4):
+
+- **Writing**, it emits the *plain* type encodings — string, list-of-strings,
+  set, hash, ZSET_2 (binary scores) — the `"REDIS0011"` header, per-key
+  `EXPIRETIME_MS` opcodes, `EOF`, and the trailing little-endian **CRC-64/redis**
+  checksum (reflected Jones polynomial; verified by Redis on load).
+- **Reading**, it parses both those and the compact encodings Redis 7.x actually
+  writes — **intset**, **listpack**, **quicklist v2** — plus **int-encoded** and
+  **LZF-compressed** strings, and the aux/idle/freq/function opcodes. Loaded
+  collections re-derive their encoding from the configured thresholds. Truly
+  legacy ziplist encodings and stream/module payloads are rejected with a clear
+  error (Redis 7.x doesn't write them for the core types).
+
+`DEBUG RELOAD` round-trips the live keyspace through this codec; startup loads
+`dump.rdb` from `dir`; save points (`save 900 1`) trigger `BGSAVE` from the cron
+once the dirty counter and elapsed time both clear a threshold.
+
 ## Changelog
+
+### Phase 4A — RDB persistence
+- **CRC-64/redis** (`Crc64`), RDB constants, **LZF** decompression.
+- **`RdbWriter`** (plain encodings, CRC trailer) and **`RdbReader`** (plain +
+  intset/listpack/quicklist-v2 + int/LZF strings).
+- **Fork-free `RdbPersistence`**: synchronous `SAVE`, deep-copy-snapshot `BGSAVE`,
+  startup load, `DEBUG RELOAD`, cron-driven save points. Wired into `ServerContext`
+  via a `Persistence` interface; bootstrap loads `dump.rdb` before serving.
+- **Commands**: `SAVE`, `BGSAVE`, `LASTSAVE`, `DEBUG RELOAD`.
+- **Tests**: round-trip of every type + TTL; CRC-64 check vector; restart
+  durability; and a Testcontainers cross-compat IT (both directions) — also
+  verified manually here: real `redis-server` loads JediCore's dump, and JediCore
+  loads a real-redis dump (intset/listpack/quicklist + a 500-byte LZF string).
+- **Benchmark**: `BGSAVE` snapshot pause ≈ 0.81 ms / 10k keys; serialize ≈ 0.63 ms.
+- **Deferred to 4B**: AOF (appendonly, fsync policies, `BGREWRITEAOF`, Redis 7
+  multi-part base+incr+manifest, crash-consistency).
 
 ### Phase 3 — active expiration, memory accounting, eviction
 - **Active expiration**: `ActiveExpiry` probabilistic cycle (sample 20, repeat if

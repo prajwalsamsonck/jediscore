@@ -42,5 +42,6 @@ public final class CoreCommands {
         ZSetCommands.registerAll(registry);
         ScanCommands.registerAll(registry);
         MemoryCommands.registerAll(registry);
+        PersistenceCommands.registerAll(registry);
     }
 }

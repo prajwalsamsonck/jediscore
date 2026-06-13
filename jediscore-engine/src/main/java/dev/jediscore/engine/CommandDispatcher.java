@@ -69,7 +69,11 @@ public final class CommandDispatcher {
 
         ctx.connection().setLastCommand(spec.name());
         try {
-            return spec.handler().execute(ctx);
+            RespValue reply = spec.handler().execute(ctx);
+            if (Eviction.isDenyOom(upperName)) {
+                server.markDirty(1); // count data-adding writes toward RDB save points
+            }
+            return reply;
         } catch (CommandException e) {
             // A deliberate, client-facing error (WRONGTYPE, bad integer, syntax, …).
             return RespValue.error(e.getMessage());

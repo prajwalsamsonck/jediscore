@@ -20,6 +20,8 @@ public final class ServerContext {
     private final AtomicLong clientIdSeq = new AtomicLong(0);
     private final ConcurrentHashMap<Long, ClientConnection> clients = new ConcurrentHashMap<>();
     private final Database[] databases;
+    private Persistence persistence;
+    private long dirty;
 
     /**
      * Creates a server context, allocating the configured number of databases.
@@ -52,6 +54,39 @@ public final class ServerContext {
     /** @return the number of databases */
     public int databaseCount() {
         return databases.length;
+    }
+
+    /** @return the persistence service, or {@code null} if persistence is not wired */
+    public Persistence persistence() {
+        return persistence;
+    }
+
+    /**
+     * Attaches the persistence service (called once during startup wiring).
+     *
+     * @param persistence the service
+     */
+    public void setPersistence(Persistence persistence) {
+        this.persistence = persistence;
+    }
+
+    /** @return the number of write operations since the dirty counter was last reset */
+    public long dirty() {
+        return dirty;
+    }
+
+    /**
+     * Records write operations against the dirty counter (drives RDB save points).
+     *
+     * @param count the number of changes
+     */
+    public void markDirty(long count) {
+        dirty += count;
+    }
+
+    /** Resets the dirty counter (after a successful save). */
+    public void resetDirty() {
+        dirty = 0;
     }
 
     /** @return the approximate total memory used across all databases, in bytes */
