@@ -92,18 +92,7 @@ class CommandDispatcherTest {
 
     @Test
     void authGateBlocksWhenPasswordSetAndUnauthenticated() {
-        ServerConfig secured = new ServerConfig(
-                "127.0.0.1", 0, 511, Optional.of("secret"), ServerConfig.DEFAULT_VERSION, "runid",
-                ServerConfig.DEFAULT_DATABASES,
-                ServerConfig.DEFAULT_HASH_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_HASH_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_LIST_MAX_LISTPACK_SIZE,
-                ServerConfig.DEFAULT_LIST_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_SET_MAX_INTSET_ENTRIES,
-                ServerConfig.DEFAULT_SET_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_SET_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_ZSET_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_ZSET_MAX_LISTPACK_VALUE);
+        ServerConfig secured = ServerConfig.secured("127.0.0.1", 0, "secret");
         ClientConnection unauth = new ClientConnection(2, "127.0.0.1:2", "127.0.0.1:6379", false);
         RespValue reply = dispatch(secured, unauth, "GET", "k");
         assertThat(((RespValue.SimpleError) reply).message()).isEqualTo("NOAUTH Authentication required.");
@@ -111,18 +100,7 @@ class CommandDispatcherTest {
 
     @Test
     void authGateAllowsAfterAuthentication() {
-        ServerConfig secured = new ServerConfig(
-                "127.0.0.1", 0, 511, Optional.of("secret"), ServerConfig.DEFAULT_VERSION, "runid",
-                ServerConfig.DEFAULT_DATABASES,
-                ServerConfig.DEFAULT_HASH_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_HASH_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_LIST_MAX_LISTPACK_SIZE,
-                ServerConfig.DEFAULT_LIST_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_SET_MAX_INTSET_ENTRIES,
-                ServerConfig.DEFAULT_SET_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_SET_MAX_LISTPACK_VALUE,
-                ServerConfig.DEFAULT_ZSET_MAX_LISTPACK_ENTRIES,
-                ServerConfig.DEFAULT_ZSET_MAX_LISTPACK_VALUE);
+        ServerConfig secured = ServerConfig.secured("127.0.0.1", 0, "secret");
         ClientConnection conn = new ClientConnection(3, "127.0.0.1:3", "127.0.0.1:6379", false);
         conn.setAuthenticated(true);
         RespValue reply = dispatch(secured, conn, "GET", "k");

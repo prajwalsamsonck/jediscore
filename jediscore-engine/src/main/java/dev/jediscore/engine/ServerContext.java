@@ -54,6 +54,15 @@ public final class ServerContext {
         return databases.length;
     }
 
+    /** @return the approximate total memory used across all databases, in bytes */
+    public long usedMemory() {
+        long total = 0;
+        for (Database database : databases) {
+            total += database.memoryUsed();
+        }
+        return total;
+    }
+
     /**
      * Swaps the contents of two databases (for {@code SWAPDB}). Connections hold a
      * database <em>index</em>, not a reference, so after the swap every client

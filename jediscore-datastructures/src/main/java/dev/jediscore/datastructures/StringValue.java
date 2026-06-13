@@ -77,6 +77,11 @@ public final class StringValue extends RedisValue {
     }
 
     @Override
+    public long estimateBytes() {
+        return 16 + data.length;
+    }
+
+    @Override
     public StringValue deepCopy() {
         StringValue copy = new StringValue(data.clone());
         copy.forcedRaw = this.forcedRaw;

@@ -220,6 +220,15 @@ public final class ZSetValue extends RedisValue {
     }
 
     @Override
+    public long estimateBytes() {
+        long total = 64;
+        for (ScoredMember m : ascending()) {
+            total += m.member().length + 16 + 8;
+        }
+        return total;
+    }
+
+    @Override
     public ZSetValue deepCopy() {
         ZSetValue copy = new ZSetValue(maxListpackEntries, maxValue);
         for (ScoredMember m : ascending()) {

@@ -2,6 +2,7 @@ package dev.jediscore.datastructures;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 
 /**
@@ -206,6 +207,32 @@ public final class Dict<V> {
             visited++;
         } while (v != 0 && visited < count);
         return v;
+    }
+
+    /**
+     * Returns up to {@code count} keys sampled by probing buckets from a random
+     * start — the approach Redis uses for expiry/eviction sampling. The sample is
+     * cheap (O(count)) and approximately uniform, not a perfectly uniform draw.
+     *
+     * @param count the desired sample size
+     * @return up to {@code count} keys
+     */
+    public List<Bytes> sampleKeys(int count) {
+        List<Bytes> out = new ArrayList<>(Math.min(count, used));
+        if (used == 0 || count <= 0) {
+            return out;
+        }
+        int buckets = table.length;
+        int idx = ThreadLocalRandom.current().nextInt(buckets);
+        int examined = 0;
+        while (out.size() < count && examined < buckets) {
+            for (Node<V> node = table[idx]; node != null && out.size() < count; node = node.next) {
+                out.add(node.key);
+            }
+            idx = (idx + 1) & (buckets - 1);
+            examined++;
+        }
+        return out;
     }
 
     private Node<V> nodeFor(Bytes key) {

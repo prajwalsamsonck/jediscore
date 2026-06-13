@@ -4,31 +4,34 @@ import dev.jediscore.datastructures.Bytes;
 import dev.jediscore.datastructures.Dict;
 import dev.jediscore.datastructures.RedisValue;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.LongSupplier;
 
 /**
- * A single logical Redis database (keyspace): the key → value dictionary plus a
- * parallel table of per-key expiration times.
+ * A single logical Redis database (keyspace): the key → value dictionary, a
+ * parallel table of per-key expiration times, and a running approximate memory
+ * total for this database.
  *
- * <p>The key dictionary is a {@link Dict} (not a {@code HashMap}) specifically so
- * that {@code SCAN} can iterate it with Redis's bucket cursor; the expiry table,
- * which is never scanned, remains a plain {@link HashMap}.
+ * <p>Both the key dictionary and the expiry table are {@link Dict}s so that
+ * {@code SCAN} can iterate the keyspace and the expiry/eviction cycles can sample
+ * keys cheaply.
  *
- * <p><strong>Threading.</strong> Only ever touched by the single command thread,
- * so no locking. <strong>Expiration</strong> is lazy: an expired key is removed
- * the next time it is accessed (and {@code KEYS}/{@code DBSIZE} purge as they scan).
+ * <p><strong>Threading.</strong> Only ever touched by the single command thread
+ * (the active-expiry cycle is submitted to that thread too), so no locking.
+ * <strong>Expiration</strong> is two-tier: lazy (here, on access) plus an active
+ * background cycle (see {@link ActiveExpiry}). <strong>Memory</strong> is tracked
+ * at whole-key write granularity; in-place mutations are reconciled the next time
+ * the key is written (a documented approximation — see {@link MemoryEstimator}).
  */
 public final class Database {
 
     private final int index;
     private final LongSupplier clock;
     private final Dict<RedisValue> dict = new Dict<>();
-    private final Map<Bytes, Long> expires = new HashMap<>();
+    private final Dict<Long> expires = new Dict<>();
+    private long memoryUsed;
 
     /**
      * Creates a database.
@@ -47,8 +50,7 @@ public final class Database {
     }
 
     /**
-     * Looks up a key, honouring expiration, and records an access for idle-time
-     * tracking.
+     * Looks up a key, honouring expiration, and records an access for LRU/LFU.
      *
      * @param key the key
      * @return the live value, or {@code null} if absent or expired
@@ -65,7 +67,7 @@ public final class Database {
     }
 
     /**
-     * Like {@link #lookup} but does not update the access time.
+     * Like {@link #lookup} but does not update the access metadata.
      *
      * @param key the key
      * @return the live value, or {@code null}
@@ -84,7 +86,7 @@ public final class Database {
      * @param value the value
      */
     public void put(Bytes key, RedisValue value) {
-        dict.put(key, value);
+        store(key, value);
         expires.remove(key);
     }
 
@@ -95,7 +97,16 @@ public final class Database {
      * @param value the value
      */
     public void putKeepTtl(Bytes key, RedisValue value) {
-        dict.put(key, value);
+        store(key, value);
+    }
+
+    private void store(Bytes key, RedisValue value) {
+        RedisValue old = dict.put(key, value);
+        if (old == null) {
+            memoryUsed += MemoryEstimator.usage(key, value);
+        } else {
+            memoryUsed += value.estimateBytes() - old.estimateBytes();
+        }
     }
 
     /**
@@ -106,7 +117,12 @@ public final class Database {
      */
     public boolean remove(Bytes key) {
         expires.remove(key);
-        return dict.remove(key) != null;
+        RedisValue old = dict.remove(key);
+        if (old != null) {
+            memoryUsed -= MemoryEstimator.usage(key, old);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -119,15 +135,21 @@ public final class Database {
         return peek(key) != null;
     }
 
-    /** @return the number of live keys (lazily; expired-but-unaccessed keys may be counted) */
+    /** @return the number of live keys */
     public int size() {
         return dict.size();
+    }
+
+    /** @return the approximate memory used by this database, in bytes */
+    public long memoryUsed() {
+        return memoryUsed;
     }
 
     /** Removes all keys and TTLs. */
     public void clear() {
         dict.clear();
         expires.clear();
+        memoryUsed = 0;
     }
 
     /**
@@ -179,6 +201,31 @@ public final class Database {
         return expires.containsKey(key);
     }
 
+    /** @return the number of keys with a TTL (volatile keys) */
+    public int volatileCount() {
+        return expires.size();
+    }
+
+    /**
+     * Samples up to {@code count} keys that have a TTL (for active expiry).
+     *
+     * @param count the sample size
+     * @return sampled volatile keys
+     */
+    public List<Bytes> sampleVolatileKeys(int count) {
+        return expires.sampleKeys(count);
+    }
+
+    /**
+     * Samples up to {@code count} keys from the whole keyspace (for eviction).
+     *
+     * @param count the sample size
+     * @return sampled keys
+     */
+    public List<Bytes> sampleKeys(int count) {
+        return dict.sampleKeys(count);
+    }
+
     // ---- Iteration / introspection ------------------------------------------
 
     /** @return a snapshot of all live keys (expired keys are purged as a side effect) */
@@ -199,8 +246,7 @@ public final class Database {
         }
         if (expired != null) {
             for (Bytes key : expired) {
-                dict.remove(key);
-                expires.remove(key);
+                remove(key);
             }
         }
         return keys;
@@ -229,8 +275,7 @@ public final class Database {
             return false;
         }
         if (when <= clock.getAsLong()) {
-            dict.remove(key);
-            expires.remove(key);
+            remove(key);
             return true;
         }
         return false;

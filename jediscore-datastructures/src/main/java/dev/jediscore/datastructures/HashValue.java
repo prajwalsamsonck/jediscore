@@ -200,6 +200,16 @@ public final class HashValue extends RedisValue {
     }
 
     @Override
+    public long estimateBytes() {
+        long total = 64;
+        List<byte[]> flat = entriesFlattened();
+        for (byte[] piece : flat) {
+            total += piece.length + 16;
+        }
+        return total;
+    }
+
+    @Override
     public HashValue deepCopy() {
         HashValue copy = new HashValue(maxEntries, maxValue);
         List<byte[]> flat = entriesFlattened();

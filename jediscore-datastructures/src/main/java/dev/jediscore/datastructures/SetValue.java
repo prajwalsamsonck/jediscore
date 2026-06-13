@@ -186,6 +186,15 @@ public final class SetValue extends RedisValue {
     }
 
     @Override
+    public long estimateBytes() {
+        long total = 48;
+        for (byte[] m : members()) {
+            total += m.length + 16;
+        }
+        return total;
+    }
+
+    @Override
     public SetValue deepCopy() {
         SetValue copy = new SetValue(maxIntset, maxListpack, maxValue);
         for (byte[] m : members()) {

@@ -60,6 +60,13 @@ public final class CommandDispatcher {
             return RespValue.error("NOAUTH Authentication required.");
         }
 
+        // maxmemory: free memory before a data-adding command; refuse if we can't.
+        if (server.config().maxMemory() > 0 && Eviction.isDenyOom(upperName)) {
+            if (!Eviction.evictToFit(server)) {
+                return RespValue.error("OOM command not allowed when used memory > 'maxmemory'.");
+            }
+        }
+
         ctx.connection().setLastCommand(spec.name());
         try {
             return spec.handler().execute(ctx);

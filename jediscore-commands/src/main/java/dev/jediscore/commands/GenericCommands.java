@@ -347,7 +347,7 @@ public final class GenericCommands {
         String sub = ctx.argUpper(1);
         if (sub.equals("HELP")) {
             return new RespValue.Array(List.of(RespValue.simple(
-                    "OBJECT <ENCODING|REFCOUNT|IDLETIME> <key>")));
+                    "OBJECT <ENCODING|REFCOUNT|IDLETIME|FREQ> <key>")));
         }
         if (ctx.argCount() != 3) {
             throw new CommandException(
@@ -358,12 +358,29 @@ public final class GenericCommands {
         if (value == null) {
             throw new CommandException("ERR no such key");
         }
+        boolean lfu = ctx.server().config().maxMemoryPolicy().isLfu();
         return switch (sub) {
             case "ENCODING" -> RespValue.bulk(value.encoding());
             // We do not share objects, so refcount is always 1.
             case "REFCOUNT" -> RespValue.integer(1);
-            case "IDLETIME" -> RespValue.integer(
-                    Math.max(0, (System.currentTimeMillis() - value.lastAccessMillis()) / 1000));
+            case "IDLETIME" -> {
+                if (lfu) {
+                    throw new CommandException(
+                            "ERR An LFU maxmemory policy is selected, idle time not tracked. "
+                                    + "Please note that when switching between maxmemory policies at runtime "
+                                    + "LFU and LRU data will take some time to adjust.");
+                }
+                yield RespValue.integer(value.idleMillis(System.currentTimeMillis()) / 1000);
+            }
+            case "FREQ" -> {
+                if (!lfu) {
+                    throw new CommandException(
+                            "ERR An LFU maxmemory policy is not selected, access frequency not tracked. "
+                                    + "Please note that when switching between maxmemory policies at runtime "
+                                    + "LFU and LRU data will take some time to adjust.");
+                }
+                yield RespValue.integer(value.frequency());
+            }
             default -> throw new CommandException(
                     "ERR Unknown subcommand or wrong number of arguments for '" + ctx.argText(1)
                             + "'. Try OBJECT HELP.");

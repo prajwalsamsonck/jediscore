@@ -5,6 +5,7 @@ import dev.jediscore.engine.CommandExecutor;
 import dev.jediscore.engine.CommandRegistry;
 import dev.jediscore.engine.ServerConfig;
 import dev.jediscore.engine.ServerContext;
+import dev.jediscore.engine.ServerCron;
 import dev.jediscore.network.RespServer;
 
 /**
@@ -22,12 +23,15 @@ public final class JediCore implements AutoCloseable {
     private final ServerContext context;
     private final RespServer server;
     private final CommandExecutor executor;
+    private final ServerCron cron;
     private final int port;
 
-    private JediCore(ServerContext context, RespServer server, CommandExecutor executor, int port) {
+    private JediCore(ServerContext context, RespServer server, CommandExecutor executor,
+                     ServerCron cron, int port) {
         this.context = context;
         this.server = server;
         this.executor = executor;
+        this.cron = cron;
         this.port = port;
     }
 
@@ -50,7 +54,12 @@ public final class JediCore implements AutoCloseable {
 
         RespServer server = new RespServer(context);
         int boundPort = server.start();
-        return new JediCore(context, server, executor, boundPort);
+
+        // Start background maintenance (active expiration; eviction housekeeping).
+        ServerCron cron = new ServerCron(context);
+        cron.start();
+
+        return new JediCore(context, server, executor, cron, boundPort);
     }
 
     /** @return the bound TCP port */
@@ -73,9 +82,10 @@ public final class JediCore implements AutoCloseable {
         server.awaitShutdown();
     }
 
-    /** Shuts the network server down, then the command loop. Idempotent enough for a shutdown hook. */
+    /** Stops background maintenance, then the network server, then the command loop. */
     @Override
     public void close() {
+        cron.close();
         server.close();
         executor.close();
     }

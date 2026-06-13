@@ -211,7 +211,89 @@ Redis, asserting byte-identical replies. It already caught a real bug (`HINCRBY`
 with a bad increment was creating the key before validation). It runs against a
 Redis from `-Djedicore.diff.redis=host:port` or Testcontainers (CI).
 
+## Expiration, memory accounting & eviction (Phase 3)
+
+### Two-tier expiration
+
+Keys with a TTL are reclaimed two ways, exactly as Redis does:
+
+- **Lazy** — every access (`lookup`) checks the key's expiry and removes it if due.
+  Cheap, but leaks memory for keys never touched again.
+- **Active** — `ServerCron` (a daemon timer) submits `ActiveExpiry.run` to the
+  command thread every 100&nbsp;ms. For each database it samples 20 keys that have
+  a TTL, deletes the expired ones, and — if more than 25% of the batch was expired
+  — samples again (assuming many stale keys remain), capped per database to bound
+  the work. The cron thread itself never touches the keyspace; it only enqueues
+  the cycle onto the single command thread, preserving the threading model.
+
+### Memory accounting
+
+Each `RedisValue` reports an approximate `estimateBytes()`; a key's cost adds a
+fixed per-key overhead (`MemoryEstimator`). Each `Database` keeps a running
+`memoryUsed` total, updated on whole-key writes and removals, and `ServerContext`
+sums them for `used_memory`. **Accuracy tradeoff (documented honestly):** the JVM
+exposes no allocator-exact byte count the way Redis's `zmalloc` does, so the
+numbers are estimates — stable and proportional, not absolute — and *in-place*
+mutations (`APPEND`, `LPUSH`, `HSET` on an existing key) are reconciled only when
+the key is next written whole. `MEMORY USAGE` accepts `SAMPLES` but computes the
+value fully.
+
+### LRU/LFU object metadata
+
+`RedisValue` carries the per-object eviction metadata Redis keeps: a last-access
+clock (LRU idle) and an 8-bit **logarithmic LFU counter**. On each access the
+counter is first *decayed* toward zero by elapsed minutes, then *probabilistically
+incremented* with probability `1/(baseval·log_factor+1)` — so it approximates
+`log(access_frequency)` and saturates slowly. Constants use Redis's defaults
+(init 5, log-factor 10, decay 1&nbsp;min). `OBJECT FREQ` exposes the counter (LFU
+policies only); `OBJECT IDLETIME` exposes idle seconds (non-LFU policies only).
+
+### Eviction algorithm and accuracy tradeoffs
+
+When `used_memory` exceeds `maxmemory`, `Eviction.evictToFit` removes victims
+until back under the limit. It does **not** maintain a global LRU/LFU order;
+instead, like Redis, it **samples `maxmemory-samples` keys** and evicts the best
+one for the policy, repeating as needed. The score is unified so "higher = more
+evictable": LRU → idle time, LFU → `255 − frequency`, `volatile-ttl` → soonest
+expiry, `*-random` → a random draw. `volatile-*` policies only sample keys with a
+TTL, so persistent keys are never their victims. The dispatcher runs eviction
+before any data-adding (`denyoom`) command and returns
+`OOM command not allowed…` if the limit still can't be met (always so under
+`noeviction`).
+
+```mermaid
+graph TD
+    write[denyoom command] --> over{used &gt; maxmemory?}
+    over -->|no| exec[execute]
+    over -->|yes| pol{policy}
+    pol -->|noeviction| oom[reply OOM]
+    pol -->|other| sample[sample N keys] --> pick[evict best by score] --> over
+```
+
+**Accuracy:** eviction is approximate — the victim is the best of a small sample,
+not the global optimum, and accuracy rises with the sample size. Redis additionally
+keeps a 16-entry candidate pool across calls for a better approximation; JediCore
+uses the simpler per-call sampling (documented). Memory enforcement is exact for
+whole-key writes (which the eviction tests drive via `SET`) and approximate under
+in-place growth.
+
 ## Changelog
+
+### Phase 3 — active expiration, memory accounting, eviction
+- **Active expiration**: `ActiveExpiry` probabilistic cycle (sample 20, repeat if
+  >25% expired), driven on the command thread by `ServerCron` every 100 ms.
+- **Memory accounting**: `RedisValue.estimateBytes()` per type, `MemoryEstimator`,
+  per-database `memoryUsed`, `ServerContext.usedMemory()`; `MEMORY USAGE`/`DOCTOR`.
+- **LRU/LFU metadata**: clock-based logarithmic LFU counter with decay + LRU idle
+  on every `RedisValue`; `OBJECT FREQ`/`IDLETIME` with policy gating.
+- **Eviction**: `maxmemory` + all 8 policies via sampling (`Eviction`), wired into
+  the dispatcher with `denyoom`/OOM semantics; `Dict.sampleKeys` for sampling.
+- **Tests**: active-expiry-without-access, memory tracking, all eviction policies
+  (incl. deterministic volatile-scope and LRU/LFU ordering with real time gaps),
+  and a socket integration test (eviction bound, OOM, MEMORY, OBJECT FREQ gating).
+  The differential test re-passes vs Redis 7.4 (eviction inert at maxmemory 0).
+- **Benchmarks**: active-expiry cycle 2.64 ops/µs (~0.38 µs/cycle); eviction under
+  pressure 1.67 ops/µs.
 
 ### Phase 2D — the SCAN cursor family
 - **`Dict`**: a custom chained hash table (power-of-two buckets, synchronous

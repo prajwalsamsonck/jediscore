@@ -237,6 +237,15 @@ public final class ListValue extends RedisValue {
     }
 
     @Override
+    public long estimateBytes() {
+        long total = 48;
+        for (byte[] e : store.toList()) {
+            total += e.length + 16;
+        }
+        return total;
+    }
+
+    @Override
     public ListValue deepCopy() {
         ListValue copy = new ListValue(maxListpackSize, maxValueSize);
         for (byte[] e : store.toList()) {

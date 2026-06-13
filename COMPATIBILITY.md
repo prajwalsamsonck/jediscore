@@ -56,8 +56,10 @@ document, updated every phase as commands are implemented.
 | `SELECT` | ✅ Done | 16 databases; `ERR DB index is out of range`. |
 | `DBSIZE` | ✅ Done | Excludes logically-expired keys. |
 | `FLUSHDB` / `FLUSHALL` | ✅ Done | `ASYNC`/`SYNC` accepted (flushing is synchronous). |
-| `OBJECT ENCODING/REFCOUNT/IDLETIME` | 🚧 Partial | REFCOUNT always 1 (no object sharing). |
-| `EXPIRE`/`TTL`/`PERSIST` family | ✅ Done | NX/XX/GT/LT; EXPIRETIME/PEXPIRETIME. |
+| `OBJECT ENCODING/REFCOUNT/IDLETIME/FREQ` | 🚧 Partial | REFCOUNT always 1 (no object sharing); FREQ requires an LFU policy, IDLETIME a non-LFU policy. |
+| `MEMORY USAGE` / `MEMORY DOCTOR` | ✅ Done | Estimated bytes (not allocator-exact); DOCTOR gives a basic summary. |
+| `EXPIRE`/`TTL`/`PERSIST` family | ✅ Done | NX/XX/GT/LT; EXPIRETIME/PEXPIRETIME. Lazy + active (background) expiration. |
+| `maxmemory` eviction | ✅ Done | All 8 policies (noeviction, {allkeys,volatile}-{lru,lfu,random}, volatile-ttl); sampled LRU/clock-based LFU. |
 | `SCAN` | ✅ Done | `MATCH`/`COUNT`/`TYPE`; reverse-binary bucket cursor. |
 | `SWAPDB` | ✅ Done | |
 
