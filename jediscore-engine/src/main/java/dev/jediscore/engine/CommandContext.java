@@ -13,18 +13,40 @@ public final class CommandContext {
     private final ServerContext server;
     private final ClientConnection connection;
     private final byte[][] args;
+    private final boolean blockingAllowed;
 
     /**
-     * Creates a context.
+     * Creates a context in which blocking commands may block.
      *
      * @param server     the server context
      * @param connection the issuing connection
      * @param args       the argument vector ({@code args[0]} is the command name)
      */
     public CommandContext(ServerContext server, ClientConnection connection, byte[][] args) {
+        this(server, connection, args, true);
+    }
+
+    /**
+     * Creates a context, specifying whether blocking commands may block.
+     *
+     * @param server          the server context
+     * @param connection      the issuing connection
+     * @param args            the argument vector ({@code args[0]} is the command name)
+     * @param blockingAllowed {@code false} inside {@code EXEC} (and other contexts
+     *                        where a command must not park), so a blocking command
+     *                        that cannot be satisfied returns its timeout reply now
+     */
+    public CommandContext(ServerContext server, ClientConnection connection, byte[][] args,
+                          boolean blockingAllowed) {
         this.server = server;
         this.connection = connection;
         this.args = args;
+        this.blockingAllowed = blockingAllowed;
+    }
+
+    /** @return whether a blocking command issued in this context may park the client */
+    public boolean blockingAllowed() {
+        return blockingAllowed;
     }
 
     /** @return the server context */

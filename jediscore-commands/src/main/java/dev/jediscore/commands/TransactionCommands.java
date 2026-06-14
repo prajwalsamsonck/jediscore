@@ -106,8 +106,10 @@ public final class TransactionCommands {
         for (byte[][] args : queued) {
             // Replay through the dispatcher; the transaction flag is already
             // cleared, so each command takes the normal (non-queueing) path and
-            // its write-tracking / CAS / AOF side effects run as usual.
-            replies.add(server.dispatcher().dispatch(new CommandContext(server, conn, args)));
+            // its write-tracking / CAS / AOF side effects run as usual. Blocking is
+            // disallowed: a BLPOP inside a transaction must not park — it returns
+            // its timeout reply if it cannot be satisfied immediately.
+            replies.add(server.dispatcher().dispatch(new CommandContext(server, conn, args, false)));
         }
         return new RespValue.Array(replies);
     }

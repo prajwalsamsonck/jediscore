@@ -131,6 +131,10 @@ public final class CommandDispatcher {
                 if (persistence != null && persistence.appendOnlyEnabled()) {
                     persistence.feedAppendOnly(conn.db(), ctx.args());
                 }
+                // A write (e.g. RPUSH) may make a key ready for a blocked BLPOP.
+                if (server.blocking().hasBlockedClients()) {
+                    server.blocking().signalKeys(conn.db(), ctx.args());
+                }
             }
             return reply;
         } catch (CommandException e) {

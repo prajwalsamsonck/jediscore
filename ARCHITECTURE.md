@@ -492,7 +492,79 @@ short-circuits when no key in the db is watched (≈ 2 ns on the hot write path)
 the db index) stays aligned with the slot under which watches are registered, and
 touches all watchers in both databases.
 
+## Blocking commands (Phase 5C)
+
+### The constraint, and the wait-queue
+
+The single command thread must **never block** — so `BLPOP` on an empty key cannot
+wait inline. Instead the command registers the client in a `BlockingManager` and
+returns no reply (`dispatch` returns `null`, so `CommandHandler` writes nothing);
+the command thread keeps serving. The eventual reply is pushed out-of-band through
+the same `ClientOutbox` that pub/sub uses. This is an **event-driven wait-queue**,
+deliberately chosen over a (virtual or platform) thread parked per blocked client:
+it costs nothing while idle and keeps every keyspace mutation on the one thread.
+
+```mermaid
+sequenceDiagram
+    participant A as Client A (BLPOP q 0)
+    participant Cmd as Command thread
+    participant Mgr as BlockingManager
+    participant B as Client B (RPUSH q x)
+    A->>Cmd: BLPOP q 0
+    Cmd->>Mgr: attempt() → empty → block on q (FIFO)
+    Note over A: no reply yet
+    B->>Cmd: RPUSH q x
+    Cmd->>Mgr: signalKeys(db, [RPUSH, q, x])
+    Mgr->>Mgr: attempt() → pop x, propagate RPOP/LPOP
+    Mgr-->>A: deliver [q, x] via outbox
+```
+
+### One operation, two call sites
+
+A blocking command builds a `BlockingOp` whose `attempt()` runs the *real* pop. It
+is called once immediately (so a ready key replies synchronously) and again each
+time a key it waits on is signalled — so blocking and non-blocking semantics are
+identical by construction, and every wakeup **re-validates** the condition. A
+signal that finds the key empty, already drained by an earlier waiter, or turned
+into the wrong type is handled correctly (a type clash unblocks the client with a
+`WRONGTYPE` error). On success the op propagates the **effective** command
+(`LPOP`/`RPOP`/`LMOVE`/`ZPOPMIN`…) to the AOF and WATCH layer — a blocking command
+is never itself written to the AOF, since replaying it could block during load.
+
+### FIFO, timeouts, chaining, and EXEC
+
+Each `(db, key)` keeps an insertion-ordered deque, so the longest-waiting client
+wins. Timeouts use a shared daemon scheduler that fires at the deadline and
+*submits* the timeout to the command thread — precise, single-threaded, no
+busy-waiting. Serves that themselves make a key ready (`BLMOVE` pushing to its
+destination) enqueue a follow-up signal drained iteratively, so chained wakeups
+(`BLMOVE` → a blocked `BLPOP`) never recurse. Inside `EXEC` (and any
+`blockingAllowed = false` context) an unsatisfiable command returns its timeout
+reply immediately instead of parking. The per-write signal is gated by a cheap
+`hasBlockedClients()` check (≈ 1 ns when no one is blocked).
+
 ## Changelog
+
+### Phase 5C — Blocking commands
+- **`BlockingManager`**: command-thread-confined per-`(db,key)` FIFO wait-queues;
+  event-driven serve on write signals; daemon-scheduler timeouts submitted back to
+  the command thread; iterative signal draining for chained wakeups; disconnect/
+  RESET cancellation.
+- **`BlockingOp`**: the retry body shared by the immediate attempt and every
+  wakeup; serves propagate the effective non-blocking command.
+- **`CommandContext.blockingAllowed`**: `EXEC` replays with it false so blocking
+  commands don't park inside a transaction; `ServerContext.propagateWrite` lets a
+  served block mark dirty / invalidate WATCH / feed the AOF.
+- **Dispatcher**: signals ready keys after each write (behind a `hasBlockedClients`
+  gate).
+- **Commands** (`BlockingCommands`): `BLPOP`/`BRPOP`/`BLMOVE`/`BRPOPLPUSH`/
+  `BLMPOP`/`BZPOPMIN`/`BZPOPMAX`/`WAIT`.
+- **Tests**: 13 end-to-end tests — immediate service, async wakeup, FIFO ordering,
+  precise timeout (deadline honoured), chained BLMOVE→BLPOP, wrong-type unblock,
+  BZPOP/BLMPOP, WAIT (immediate and timeout), and non-blocking-inside-MULTI.
+- **Benchmark**: per-write readiness signal ≈ 1.3 ns with nobody blocked (the
+  common path), ≈ 49 ns with blocks on unrelated keys — O(args), independent of
+  blocked-client count.
 
 ### Phase 5B — Transactions
 - **`WatchTable`**: command-thread-confined `(db, key) → watchers` CAS table with a

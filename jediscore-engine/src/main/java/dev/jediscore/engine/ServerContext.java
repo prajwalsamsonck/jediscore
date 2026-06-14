@@ -22,6 +22,7 @@ public final class ServerContext {
     private final Database[] databases;
     private final PubSubRegistry pubsub = new PubSubRegistry();
     private final WatchTable watchTable;
+    private final BlockingManager blocking;
     private CommandDispatcher dispatcher;
     private Persistence persistence;
     private long dirty;
@@ -51,6 +52,7 @@ public final class ServerContext {
             databases[i] = new Database(i, System::currentTimeMillis);
             databases[i].setListener(casListener);
         }
+        this.blocking = new BlockingManager(this);
     }
 
     /**
@@ -152,6 +154,28 @@ public final class ServerContext {
     /** @return the WATCH/CAS table (command-thread confined) */
     public WatchTable watchTable() {
         return watchTable;
+    }
+
+    /** @return the blocking-command wait-queue manager (command-thread confined) */
+    public BlockingManager blocking() {
+        return blocking;
+    }
+
+    /**
+     * Propagates the side effects of a write that happened outside the dispatcher's
+     * own write-tracking — namely a blocking command being served. Marks the
+     * dataset dirty, invalidates WATCHes on the affected keys, and feeds the AOF
+     * the <em>effective</em> command (e.g. {@code LPOP}, never {@code BLPOP}).
+     *
+     * @param db   the database index the write applied to
+     * @param args the effective command's argument vector
+     */
+    public void propagateWrite(int db, byte[][] args) {
+        markDirty(1);
+        watchTable.touchByArguments(db, args);
+        if (persistence != null && persistence.appendOnlyEnabled()) {
+            persistence.feedAppendOnly(db, args);
+        }
     }
 
     /** @return the command dispatcher (used by {@code EXEC} to replay queued commands) */

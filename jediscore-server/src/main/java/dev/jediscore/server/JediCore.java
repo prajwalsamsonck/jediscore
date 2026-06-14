@@ -111,6 +111,7 @@ public final class JediCore implements AutoCloseable {
         cron.close();
         server.close();
         persistence.shutdown();
+        context.blocking().shutdown();
         executor.close();
     }
 }

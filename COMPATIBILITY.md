@@ -176,6 +176,20 @@ document, updated every phase as commands are implemented.
 | CAS invalidation | ✅ Done | A watched key created/overwritten/deleted/expired (lazy or active), TTL-changed, in-place-mutated, flushed, or swapped invalidates the transaction. Conservative: a watched key whose bytes equal a non-key argument is also touched (aborts more eagerly than Redis, never misses a real change). |
 | AOF propagation | 🚧 Partial | An executed transaction's effective writes are propagated to the AOF individually, not wrapped in `MULTI`/`EXEC`. Replay is equivalent on the single command thread. |
 
+### Blocking commands
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `BLPOP` `BRPOP` | ✅ Done | Multi-key, FIFO wakeup, fractional-second timeout (`0` = forever); nil array on timeout. |
+| `BLMOVE` `BRPOPLPUSH` | ✅ Done | Blocks on the source; a push into the destination chains to wake a client blocked there. Nil bulk on timeout. |
+| `BLMPOP` | ✅ Done | `numkeys`, `LEFT`/`RIGHT`, optional `COUNT`; replies `[key, [elements]]`. |
+| `BZPOPMIN` `BZPOPMAX` | ✅ Done | Multi-key; replies `[key, member, score]`. |
+| `WAIT` | 🚧 Partial | No replication yet, so it reports 0 acked replicas — returns `0` immediately for `numreplicas 0`, otherwise blocks until the (millisecond) timeout and returns `0`. |
+| Blocking inside `MULTI`/`EXEC` | ✅ Done | Never parks: returns the timeout reply immediately if not satisfiable, matching Redis. |
+| Timeout accuracy | ✅ Done | A daemon scheduler fires at the deadline and hands the timeout to the command thread (no busy-waiting). |
+| Connection suspension | 🚧 Partial | A blocked connection's *subsequent* commands are still processed (we don't pause its read side); well-behaved clients that await the reply are unaffected. |
+| AOF propagation | ✅ Done | A served blocking pop propagates the effective `LPOP`/`RPOP`/`LMOVE`/`ZPOPMIN`… — never the blocking command itself. |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

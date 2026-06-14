@@ -47,5 +47,6 @@ public final class CoreCommands {
         // Advanced command semantics (Phase 5)
         PubSubCommands.registerAll(registry);
         TransactionCommands.registerAll(registry);
+        BlockingCommands.registerAll(registry);
     }
 }
