@@ -53,6 +53,14 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
                 format(ctx.channel().remoteAddress()),
                 format(ctx.channel().localAddress()),
                 authenticated);
+        // Out-of-band sink for pub/sub (and later, key-ready) pushes. writeAndFlush
+        // is thread-safe and is always invoked from the command thread, so it keeps
+        // per-channel ordering with this connection's own replies.
+        conn.attachOutbox(message -> {
+            if (ctx.channel().isActive()) {
+                ctx.writeAndFlush(message);
+            }
+        });
         ctx.channel().attr(ConnectionAttributes.CONNECTION).set(conn);
         server.register(conn);
         super.channelActive(ctx);
@@ -63,6 +71,9 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
         ClientConnection conn = ctx.channel().attr(ConnectionAttributes.CONNECTION).get();
         if (conn != null) {
             server.unregister(conn);
+            // Tear down pub/sub state on the command thread, where the registry
+            // lives, so it needs no locking.
+            server.executor().submit(() -> server.pubsub().removeAll(conn));
         }
         super.channelInactive(ctx);
     }

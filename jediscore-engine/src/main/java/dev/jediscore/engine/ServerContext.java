@@ -20,6 +20,7 @@ public final class ServerContext {
     private final AtomicLong clientIdSeq = new AtomicLong(0);
     private final ConcurrentHashMap<Long, ClientConnection> clients = new ConcurrentHashMap<>();
     private final Database[] databases;
+    private final PubSubRegistry pubsub = new PubSubRegistry();
     private Persistence persistence;
     private long dirty;
 
@@ -120,6 +121,11 @@ public final class ServerContext {
     /** @return the command registry */
     public CommandRegistry registry() {
         return registry;
+    }
+
+    /** @return the pub/sub fan-out registry (command-thread confined) */
+    public PubSubRegistry pubsub() {
+        return pubsub;
     }
 
     /** @return the command-execution loop */

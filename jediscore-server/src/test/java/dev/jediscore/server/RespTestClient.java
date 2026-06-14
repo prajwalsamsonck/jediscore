@@ -43,6 +43,18 @@ final class RespTestClient implements AutoCloseable {
      * @throws IOException on socket failure or premature close
      */
     RespValue call(String... args) throws IOException {
+        send(args);
+        return read();
+    }
+
+    /**
+     * Sends a command without waiting for a reply — for commands whose reply
+     * arrives out-of-band (e.g. SUBSCRIBE confirmations) or arrives later.
+     *
+     * @param args the command and its arguments
+     * @throws IOException on socket failure
+     */
+    void send(String... args) throws IOException {
         StringBuilder sb = new StringBuilder("*").append(args.length).append("\r\n");
         for (String a : args) {
             byte[] bytes = a.getBytes(StandardCharsets.UTF_8);
@@ -50,6 +62,16 @@ final class RespTestClient implements AutoCloseable {
         }
         out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
         out.flush();
+    }
+
+    /**
+     * Reads the next RESP frame (a reply or an out-of-band push), blocking until
+     * one is available or the socket read times out.
+     *
+     * @return the decoded frame
+     * @throws IOException on socket failure or premature close
+     */
+    RespValue receive() throws IOException {
         return read();
     }
 

@@ -1,6 +1,7 @@
 package dev.jediscore.engine;
 
 import dev.jediscore.protocol.RespValue;
+import dev.jediscore.protocol.RespVersion;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Set;
@@ -22,6 +23,15 @@ public final class CommandDispatcher {
 
     /** Commands permitted before authentication when a password is configured. */
     private static final Set<String> NO_AUTH_COMMANDS = Set.of("AUTH", "HELLO", "QUIT", "RESET");
+
+    /**
+     * Commands permitted while a RESP2 connection is in subscribe mode. In RESP3
+     * the restriction is lifted (pushes are out-of-band, so normal commands can
+     * interleave safely).
+     */
+    private static final Set<String> SUBSCRIBE_MODE_COMMANDS = Set.of(
+            "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE",
+            "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET");
 
     private final ServerContext server;
 
@@ -58,6 +68,15 @@ public final class CommandDispatcher {
                 && !ctx.connection().isAuthenticated()
                 && !NO_AUTH_COMMANDS.contains(upperName)) {
             return RespValue.error("NOAUTH Authentication required.");
+        }
+
+        // RESP2 subscriber mode: only the pub/sub control commands (plus PING/
+        // QUIT/RESET) may run. RESP3 carries pushes out-of-band, so it is exempt.
+        if (ctx.connection().inSubscribeMode()
+                && ctx.connection().protocol() == RespVersion.RESP2
+                && !SUBSCRIBE_MODE_COMMANDS.contains(upperName)) {
+            return RespValue.error("ERR Can't execute '" + spec.name()
+                    + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context");
         }
 
         // maxmemory: free memory before a data-adding command; refuse if we can't.

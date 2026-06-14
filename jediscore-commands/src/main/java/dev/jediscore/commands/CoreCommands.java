@@ -43,5 +43,8 @@ public final class CoreCommands {
         ScanCommands.registerAll(registry);
         MemoryCommands.registerAll(registry);
         PersistenceCommands.registerAll(registry);
+
+        // Advanced command semantics (Phase 5)
+        PubSubCommands.registerAll(registry);
     }
 }

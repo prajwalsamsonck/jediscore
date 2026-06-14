@@ -396,7 +396,84 @@ replays each incr file through the `CommandDispatcher` against a synthetic
 connection whose `loading` flag suppresses re-appending. Otherwise it falls back to
 `dump.rdb`. `DEBUG RELOAD` always round-trips through RDB regardless of AOF.
 
+## Pub/Sub (Phase 5A)
+
+### Pushing to a client without coupling the engine to Netty
+
+The keyspace is mutated only on the command thread, but pub/sub needs that thread
+to push frames to *other* connections' sockets. The engine deliberately has no
+Netty dependency, so the bridge is a one-line interface:
+
+```java
+@FunctionalInterface
+public interface ClientOutbox { void send(RespValue message); }
+```
+
+The network layer attaches one per connection on connect
+(`message -> channel.writeAndFlush(message)`), and `ClientConnection.deliver`
+calls it. Because the subscriber's own command replies and the messages pushed to
+it are **both emitted from the single command thread**, Netty preserves their
+relative order on the channel — a subscribe confirmation never races ahead of an
+earlier reply.
+
+### The fan-out registry
+
+`PubSubRegistry` holds three inverted indexes — channel→subscribers,
+pattern→subscribers, shard-channel→subscribers — keyed by the binary-safe `Bytes`
+wrapper. It is **confined to the command thread**: every subscribe, publish, and
+introspection call runs inside a command, and disconnect cleanup is *submitted to
+the command thread* rather than run on the I/O thread. That confinement is the
+same single-writer discipline the keyspace uses, so the maps need no locking.
+
+```mermaid
+sequenceDiagram
+    participant Pub as PUBLISH (command thread)
+    participant Reg as PubSubRegistry
+    participant SubA as Subscriber A channel
+    participant SubB as Subscriber B (pattern) channel
+    Pub->>Reg: publish(channel, payload)
+    Reg->>SubA: deliver Push["message", ch, payload]
+    Reg->>SubB: deliver Push["pmessage", pat, ch, payload]
+    Reg-->>Pub: receiver count (2)
+```
+
+Messages and (un)subscribe confirmations are `RespValue.Push`, which the encoder
+renders as a RESP3 `>` push and downgrades to a plain array in RESP2 — exactly
+Redis's behaviour. (Un)subscribe commands emit one frame per channel via the
+outbox and return `null`, so the dispatcher writes no extra reply.
+
+### Subscriber-mode restriction
+
+While a **RESP2** connection holds any subscription, the dispatcher permits only
+`(P|S)SUBSCRIBE` / `(P|S)UNSUBSCRIBE` / `PING` / `QUIT` / `RESET`; everything else
+returns an error. `PING` then replies in the `["pong", message]` array form so it
+is distinguishable from a delivered message. **RESP3** lifts the restriction
+entirely, because pushes are an out-of-band frame type that interleaves cleanly
+with normal replies. Sharded pub/sub keeps a separate index, so a regular
+`PUBLISH` never reaches a shard subscriber and `SPUBLISH` never reaches a regular
+one.
+
 ## Changelog
+
+### Phase 5A — Pub/Sub
+- **`ClientOutbox`**: one-way engine→network bridge for out-of-band pushes; the
+  network layer attaches `channel::writeAndFlush`, keeping the engine Netty-free.
+- **`PubSubRegistry`**: command-thread-confined channel/pattern/shard inverted
+  indexes (binary-safe `Bytes` keys); disconnect cleanup submitted to the command
+  thread, so no locks. Glob matching reuses the datastructures `Glob`.
+- **`ClientConnection`**: per-connection subscription sets, `inSubscribeMode`, the
+  volatile outbox; `RESET` drops subscriptions.
+- **Dispatcher**: RESP2 subscriber-mode command gating (RESP3 exempt).
+- **Commands** (`PubSubCommands`): `SUBSCRIBE`/`UNSUBSCRIBE`/`PSUBSCRIBE`/
+  `PUNSUBSCRIBE`/`PUBLISH`/`PUBSUB` (CHANNELS/NUMSUB/NUMPAT/SHARDCHANNELS/
+  SHARDNUMSUB) + sharded `SSUBSCRIBE`/`SUNSUBSCRIBE`/`SPUBLISH`; `PING` subscriber-
+  mode array form.
+- **Tests**: 9 end-to-end socket tests — multi-subscriber fan-out, pattern and
+  sharded delivery, running confirmation counts, unsubscribe-all, RESP2 gating,
+  RESP3 interleaving, PUBSUB introspection, disconnect cleanup. Plus a manual
+  real-`redis-cli` interop check (subscribe + publish round-trip).
+- **Benchmark**: `PUBLISH` fan-out dispatch ≈ 0.028 µs (1 sub) → 6.9 µs (1000
+  subs), ~7 ns per subscriber for frame build + delivery.
 
 ### Phase 4B — AOF persistence
 - **`AofManager`**: Redis 7 multi-part AOF (`base.rdb` + `incr.aof` + `manifest`),

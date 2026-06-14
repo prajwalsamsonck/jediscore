@@ -34,7 +34,7 @@ document, updated every phase as commands are implemented.
 | `HELLO` | ✅ Done | Protocol negotiation (2/3), `AUTH`/`SETNAME` options, `NOPROTO` on bad version. |
 | `AUTH` | 🚧 Partial | Single `requirepass` against the implicit `default` user; full ACLs deferred. |
 | `QUIT` | ✅ Done | Replies `+OK`, then closes after flush. |
-| `RESET` | ✅ Done | Resets protocol/name/auth; transactions & pubsub state reset when those land. |
+| `RESET` | ✅ Done | Resets protocol/name/auth and drops all pub/sub subscriptions; transaction state reset when that lands. |
 | `CLIENT ID` | ✅ Done | |
 | `CLIENT GETNAME` / `SETNAME` | ✅ Done | `SETNAME` rejects spaces/newlines/control chars. |
 | `CLIENT INFO` | 🚧 Partial | Representative field subset (no buffer/memory counters yet). |
@@ -149,6 +149,18 @@ document, updated every phase as commands are implemented.
 | `TTL` `PTTL` `EXPIRETIME` `PEXPIRETIME` | ✅ Done | |
 | `PERSIST` | ✅ Done | |
 | `SWAPDB` | ✅ Done | |
+
+### Pub/Sub
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `SUBSCRIBE` `UNSUBSCRIBE` | ✅ Done | One confirmation frame per channel; running subscription count. Unsubscribe with no args drops all. |
+| `PSUBSCRIBE` `PUNSUBSCRIBE` | ✅ Done | Glob pattern matching via the shared `Glob` matcher; `pmessage` delivery. |
+| `PUBLISH` | ✅ Done | Returns the receiver count (direct channel + matching pattern subscribers). |
+| `SSUBSCRIBE` `SUNSUBSCRIBE` `SPUBLISH` | ✅ Done | Redis 7 sharded pub/sub kept in a separate index; a regular `PUBLISH` never reaches shard subscribers and vice-versa. Single-node, so every shard channel lives here. |
+| `PUBSUB CHANNELS`/`NUMSUB`/`NUMPAT`/`SHARDCHANNELS`/`SHARDNUMSUB` | ✅ Done | |
+| RESP3 push type | ✅ Done | Messages and confirmations are `>` pushes in RESP3, plain arrays in RESP2 (encoder downgrade). |
+| Subscriber-mode restriction | ✅ Done | RESP2 subscribers may only run `(P\|S)SUBSCRIBE`/`(P\|S)UNSUBSCRIBE`/`PING`/`QUIT`/`RESET`; `PING` replies in the `["pong", msg]` array form. RESP3 lifts the restriction. |
 
 <!--
   Maintenance: as each command lands, add a row above with its status and any

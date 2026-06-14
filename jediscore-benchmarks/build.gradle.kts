@@ -29,4 +29,6 @@ jmh {
     timeOnIteration.set("1s")
     failOnError.set(true)
     resultFormat.set("JSON")
+    // Optional single-benchmark filter: -Pjmh.include=<regex> runs just those.
+    (project.findProperty("jmh.include") as String?)?.let { includes.set(listOf(it)) }
 }

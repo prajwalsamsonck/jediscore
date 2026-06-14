@@ -1,6 +1,10 @@
 package dev.jediscore.engine;
 
+import dev.jediscore.datastructures.Bytes;
+import dev.jediscore.protocol.RespValue;
 import dev.jediscore.protocol.RespVersion;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Server-side state for a single client connection.
@@ -30,6 +34,22 @@ public final class ClientConnection {
     private boolean closeAfterReply;
     private String lastCommand = "";
     private int db;
+
+    /**
+     * Out-of-band message sink, supplied by the network layer. {@code volatile}
+     * because it is attached on the I/O thread (on connect) and read on the
+     * command thread (when {@code PUBLISH} delivers to this connection).
+     */
+    private volatile ClientOutbox outbox;
+
+    /**
+     * Pub/sub subscriptions for this connection. Insertion-ordered to match
+     * Redis's confirmation ordering, and confined to the command thread (mutated
+     * by pub/sub commands and disconnect cleanup, both of which run there).
+     */
+    private final Set<Bytes> channels = new LinkedHashSet<>();
+    private final Set<Bytes> patterns = new LinkedHashSet<>();
+    private final Set<Bytes> shardChannels = new LinkedHashSet<>();
 
     /**
      * Creates a connection record.
@@ -149,8 +169,64 @@ public final class ClientConnection {
     }
 
     /**
+     * Attaches the out-of-band message sink (called once by the network layer on
+     * connect).
+     *
+     * @param outbox the sink
+     */
+    public void attachOutbox(ClientOutbox outbox) {
+        this.outbox = outbox;
+    }
+
+    /**
+     * Pushes an out-of-band message to this client, if a sink is attached.
+     *
+     * @param message the message to deliver
+     */
+    public void deliver(RespValue message) {
+        ClientOutbox sink = outbox;
+        if (sink != null) {
+            sink.send(message);
+        }
+    }
+
+    /** @return this connection's subscribed channels (live, mutable; command-thread only) */
+    public Set<Bytes> subscribedChannels() {
+        return channels;
+    }
+
+    /** @return this connection's subscribed patterns (live, mutable; command-thread only) */
+    public Set<Bytes> subscribedPatterns() {
+        return patterns;
+    }
+
+    /** @return this connection's subscribed shard channels (live, mutable; command-thread only) */
+    public Set<Bytes> subscribedShardChannels() {
+        return shardChannels;
+    }
+
+    /** @return whether the connection holds any subscription (channel, pattern, or shard) */
+    public boolean inSubscribeMode() {
+        return !channels.isEmpty() || !patterns.isEmpty() || !shardChannels.isEmpty();
+    }
+
+    /** @return the count reported in (P)SUBSCRIBE confirmations: channels + patterns */
+    public int regularSubscriptionCount() {
+        return channels.size() + patterns.size();
+    }
+
+    /** @return the count reported in S(SUBSCRIBE) confirmations: shard channels */
+    public int shardSubscriptionCount() {
+        return shardChannels.size();
+    }
+
+    /**
      * Resets per-session state to defaults, as required by the {@code RESET}
      * command: drop back to RESP2, clear the name, and re-evaluate auth.
+     *
+     * <p>Subscriptions are cleared here too, but the {@code RESET} handler must
+     * first remove this connection from the {@link PubSubRegistry} so the
+     * server-side inverted indexes stay consistent.
      *
      * @param authenticatedAfterReset the auth state to apply (true if no password is configured)
      */
@@ -160,5 +236,8 @@ public final class ClientConnection {
         this.authenticated = authenticatedAfterReset;
         this.closeAfterReply = false;
         this.db = 0;
+        this.channels.clear();
+        this.patterns.clear();
+        this.shardChannels.clear();
     }
 }
