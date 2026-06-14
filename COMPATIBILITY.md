@@ -190,6 +190,20 @@ document, updated every phase as commands are implemented.
 | Connection suspension | 🚧 Partial | A blocked connection's *subsequent* commands are still processed (we don't pause its read side); well-behaved clients that await the reply are unaffected. |
 | AOF propagation | ✅ Done | A served blocking pop propagates the effective `LPOP`/`RPOP`/`LMOVE`/`ZPOPMIN`… — never the blocking command itself. |
 
+### Scripting (Lua)
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `EVAL` `EVALSHA` | ✅ Done | LuaJ 5.1; `KEYS`/`ARGV` bound; numkeys validated. Scripts run on the command thread; compiled chunks are cached by SHA-1. |
+| `SCRIPT LOAD`/`EXISTS`/`FLUSH` | ✅ Done | LOAD validates + returns the SHA-1; EXISTS returns 0/1 per digest. |
+| `redis.call` / `redis.pcall` | ✅ Done | call raises (aborting the script) on a Redis error; pcall returns the `{err=…}` table. NOSCRIPT commands (SUBSCRIBE family, MULTI/EXEC/WATCH, EVAL/SCRIPT, WAIT) rejected; blocking commands run non-blocking. |
+| `redis.error_reply` / `status_reply` / `sha1hex` / `log` | ✅ Done | |
+| Value conversions | ✅ Done | Redis↔Lua both ways (int↔number, bulk↔string, status↔`{ok}`, error↔`{err}`, nil↔false, array↔table with nil-termination). Binary-safe. |
+| Sandbox | ✅ Done | `os`/`io`/module loaders removed; creating a global variable errors, as in Redis. |
+| Replication of effects | 🚧 Partial | A script's inner writes propagate to the AOF individually (effects replication), not wrapped in `MULTI`/`EXEC`; `EVAL` itself is not written to the AOF. |
+| `FUNCTION` (Redis 7 functions) | 📋 Deferred | Not implemented; the spec marks it optional. |
+| Lua version | 🚧 Partial | LuaJ implements Lua 5.1 (as Redis does); `cjson`/`cmsgpack`/`struct`/`bit` helper libraries are not bundled. |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

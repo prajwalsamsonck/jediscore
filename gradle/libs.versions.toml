@@ -15,6 +15,10 @@ assertj = "3.26.3"
 testcontainers = "1.20.4"
 jqwik = "1.9.1"
 
+# Embedded Lua for EVAL/EVALSHA (the one sanctioned runtime dep beyond the core
+# four: see Phase 5D — the spec calls for LuaJ specifically).
+luaj = "3.0.1"
+
 # Plugin versions
 jmhPlugin = "0.7.3"
 foojay = "0.9.0"
@@ -43,6 +47,8 @@ testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "
 testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 
 jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
+
+luaj-jse = { module = "org.luaj:luaj-jse", version.ref = "luaj" }
 
 [bundles]
 netty = ["netty-buffer", "netty-transport", "netty-codec", "netty-handler"]

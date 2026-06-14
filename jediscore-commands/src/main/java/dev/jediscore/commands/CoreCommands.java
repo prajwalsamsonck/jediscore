@@ -48,5 +48,6 @@ public final class CoreCommands {
         PubSubCommands.registerAll(registry);
         TransactionCommands.registerAll(registry);
         BlockingCommands.registerAll(registry);
+        ScriptingCommands.registerAll(registry);
     }
 }

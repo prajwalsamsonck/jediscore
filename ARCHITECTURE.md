@@ -543,7 +543,66 @@ destination) enqueue a follow-up signal drained iteratively, so chained wakeups
 reply immediately instead of parking. The per-write signal is gated by a cheap
 `hasBlockedClients()` check (≈ 1 ns when no one is blocked).
 
+## Scripting (Phase 5D)
+
+### Execution model
+
+A script runs **on the command thread** — `EVAL` is dispatched there like any
+command — so `redis.call` is just a synchronous re-entry into
+`dispatcher.dispatch(...)`. There is no concurrency to guard and no atomicity gap:
+the whole script is one unit of work on the single writer, exactly as Redis
+intends. Writes use **effects replication**: each inner `redis.call` propagates its
+effective command to the AOF/WATCH layer through the normal dispatch path, while
+`EVAL` itself is never written to the AOF.
+
+LuaJ (a pure-JVM Lua 5.1) is the embedded interpreter — the one runtime dependency
+beyond the core four, and the engine the spec names. One sandboxed `Globals` is
+reused across scripts: `os`/`io` and the module loaders are removed, and a
+metatable `__newindex` rejects creation of global variables (Redis's "Script
+attempted to create global variable" protection). `KEYS`/`ARGV` are rebound per
+call via `rawset` (bypassing the guard), and compiled chunks are cached by SHA-1,
+so repeated `EVAL`/`EVALSHA` skip recompilation.
+
+### Value conversion (the crux)
+
+The bridge converts both directions, matching Redis's rules:
+
+| Redis → Lua | Lua → Redis |
+|-------------|-------------|
+| integer → number | number → integer (truncated) |
+| bulk/`nil` → string/`false` | string → bulk, `true`→`1`, `false`/`nil`→nil |
+| status → `{ok=…}` | `{ok=…}` → status |
+| error → `{err=…}` | `{err=…}` → error |
+| array → 1-indexed table | table → array (first `nil` terminates) |
+
+A subtlety LuaJ forces: a numeric *string* like `"123"` reports `isnumber()` true,
+so the Lua→Redis classifier keys off the exact `type()` — otherwise a returned
+string would wrongly become an integer. Strings are converted **binary-safe** via
+`LuaString`'s raw bytes. `redis.call` raises a `LuaError` on a Redis error (the
+uncaught error becomes the script's reply); `redis.pcall` returns the `{err=…}`
+table instead.
+
 ## Changelog
+
+### Phase 5D — Lua scripting
+- **`ScriptingCommands`**: `EVAL`/`EVALSHA`/`SCRIPT LOAD`/`EXISTS`/`FLUSH` on an
+  embedded LuaJ interpreter; SHA-1 script cache + compiled-chunk cache; sandboxed,
+  global-write-protected `Globals` reused across calls with per-call `KEYS`/`ARGV`.
+- **`redis` library**: `call`/`pcall` (re-entering the dispatcher with
+  `blockingAllowed=false`, rejecting NOSCRIPT commands), `error_reply`,
+  `status_reply`, `sha1hex`, `log`.
+- **Conversions**: full Redis↔Lua mapping, binary-safe, `type()`-based to avoid the
+  numeric-string trap; effects-replication propagation of inner writes.
+- **Dependency**: `org.luaj:luaj-jse:3.0.1` (the sanctioned scripting dependency).
+- **Tests**: 14 end-to-end tests — conversions both ways, `KEYS`/`ARGV`, key
+  manipulation via `redis.call`, an INCR loop, error/status helpers, call-aborts
+  vs pcall-catches, EVALSHA/SCRIPT EXISTS/FLUSH, the SHA-1 vector, the sandbox
+  (global + `os`), NOSCRIPT rejection, and numkeys validation. Plus manual
+  real-`redis-cli` interop (table return, `redis.call` write, SCRIPT LOAD).
+- **Benchmark**: warm-cache `EVAL` ≈ 0.65 µs for a trivial script, ≈ 1.14 µs with a
+  `redis.call('set')`.
+- **Deferred**: Redis 7 `FUNCTION`s, and the `cjson`/`cmsgpack`/`struct`/`bit`
+  helper libraries.
 
 ### Phase 5C — Blocking commands
 - **`BlockingManager`**: command-thread-confined per-`(db,key)` FIFO wait-queues;

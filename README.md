@@ -8,14 +8,13 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 5C complete — **Blocking commands**: `BLPOP`/`BRPOP`/`BLMOVE`/
-> `BRPOPLPUSH`/`BLMPOP`/`BZPOPMIN`/`BZPOPMAX`/`WAIT` on an event-driven FIFO
-> wait-queue (no busy-waiting, no thread-per-client), with precise scheduler-driven
-> timeouts, condition re-validation on wakeup, and chained wakeups. On top of
-> **Transactions** (MULTI/EXEC/WATCH CAS), **Pub/Sub** (channels/patterns/sharded +
-> RESP3 push), **AOF + RDB persistence**, all five data types, the `SCAN` family,
-> two-tier expiration, memory accounting, and `maxmemory` eviction. Next (Phase 5):
-> Lua scripting (EVAL/EVALSHA/SCRIPT).
+> **Status:** Phase 5 complete — **advanced command semantics**: **Lua scripting**
+> (EVAL/EVALSHA/SCRIPT, `redis.call`/`pcall`, sandboxed LuaJ), **blocking commands**
+> (BLPOP/BLMOVE/BLMPOP/BZPOP/WAIT on an event-driven FIFO wait-queue), **transactions**
+> (MULTI/EXEC/WATCH optimistic locking), and **Pub/Sub** (channels/patterns/sharded +
+> RESP3 push). On top of **AOF + RDB persistence**, all five data types, the `SCAN`
+> family, two-tier expiration, memory accounting, and `maxmemory` eviction. Next:
+> replication (PSYNC).
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text
