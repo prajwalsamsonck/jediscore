@@ -29,6 +29,7 @@ public final class RespEncoder {
 
     private static final byte[] CRLF = {'\r', '\n'};
     private static final byte[] NULL_RESP2 = "$-1\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] NULL_ARRAY_RESP2 = "*-1\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] NULL_RESP3 = "_\r\n".getBytes(StandardCharsets.US_ASCII);
 
     private RespEncoder() {
@@ -63,6 +64,7 @@ public final class RespEncoder {
             case RespValue.BulkString b -> writeBulk(out, b.data());
             case RespValue.Array a -> writeAggregate(out, '*', a.items(), version);
             case RespValue.Null ignored -> out.writeBytes(resp3 ? NULL_RESP3 : NULL_RESP2);
+            case RespValue.NullArray ignored -> out.writeBytes(resp3 ? NULL_RESP3 : NULL_ARRAY_RESP2);
             case RespValue.Double d -> {
                 if (resp3) {
                     out.writeByte(',');

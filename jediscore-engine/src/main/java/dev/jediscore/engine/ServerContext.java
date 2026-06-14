@@ -21,6 +21,8 @@ public final class ServerContext {
     private final ConcurrentHashMap<Long, ClientConnection> clients = new ConcurrentHashMap<>();
     private final Database[] databases;
     private final PubSubRegistry pubsub = new PubSubRegistry();
+    private final WatchTable watchTable;
+    private CommandDispatcher dispatcher;
     private Persistence persistence;
     private long dirty;
 
@@ -36,8 +38,18 @@ public final class ServerContext {
         this.registry = registry;
         this.executor = executor;
         this.databases = new Database[config.databases()];
+        this.watchTable = new WatchTable(config.databases());
+        KeyspaceListener casListener = new KeyspaceListener() {
+            @Override public void onKeyModified(int db, dev.jediscore.datastructures.Bytes key) {
+                watchTable.touch(db, key);
+            }
+            @Override public void onFlushed(int db) {
+                watchTable.touchAll(db);
+            }
+        };
         for (int i = 0; i < databases.length; i++) {
             databases[i] = new Database(i, System::currentTimeMillis);
+            databases[i].setListener(casListener);
         }
     }
 
@@ -111,6 +123,15 @@ public final class ServerContext {
         Database tmp = databases[a];
         databases[a] = databases[b];
         databases[b] = tmp;
+        // Keep each database's reported index aligned with its array slot so the
+        // CAS modification signal (which carries the index) matches the slot under
+        // which watches are registered.
+        databases[a].reindex(a);
+        databases[b].reindex(b);
+        // Every key in both databases effectively changed identity, so any watcher
+        // on either database must see its transaction invalidated.
+        watchTable.touchAll(a);
+        watchTable.touchAll(b);
     }
 
     /** @return the configuration */
@@ -126,6 +147,26 @@ public final class ServerContext {
     /** @return the pub/sub fan-out registry (command-thread confined) */
     public PubSubRegistry pubsub() {
         return pubsub;
+    }
+
+    /** @return the WATCH/CAS table (command-thread confined) */
+    public WatchTable watchTable() {
+        return watchTable;
+    }
+
+    /** @return the command dispatcher (used by {@code EXEC} to replay queued commands) */
+    public CommandDispatcher dispatcher() {
+        return dispatcher;
+    }
+
+    /**
+     * Attaches the command dispatcher (called once during startup wiring, before
+     * the server accepts connections).
+     *
+     * @param dispatcher the dispatcher
+     */
+    public void setDispatcher(CommandDispatcher dispatcher) {
+        this.dispatcher = dispatcher;
     }
 
     /** @return the command-execution loop */

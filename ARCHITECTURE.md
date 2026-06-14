@@ -453,7 +453,68 @@ with normal replies. Sharded pub/sub keeps a separate index, so a regular
 `PUBLISH` never reaches a shard subscriber and `SPUBLISH` never reaches a regular
 one.
 
+## Transactions (Phase 5B)
+
+### Queueing
+
+`MULTI` sets a per-connection flag. The dispatcher then intercepts: every command
+that is not a transaction-control command (`MULTI`/`EXEC`/`DISCARD`/`WATCH`/
+`RESET`/`QUIT`) is checked for existence and arity and **queued**, replying
+`+QUEUED`. A queue-time failure (unknown command, wrong arity, NOAUTH) sets a
+`transactionError` flag so `EXEC` aborts with `-EXECABORT`; a *runtime* error
+(e.g. `WRONGTYPE`) does not abort — it simply becomes one element of the results
+array, matching Redis. `EXEC` replays the queue by calling back through
+`dispatch()` with the MULTI flag already cleared, so each command takes the normal
+path and its write-tracking / CAS / AOF side effects fire as usual.
+
+### Optimistic locking (CAS) — and the in-place-mutation problem
+
+`WATCH` registers `(db, key) → connection` in a command-thread-confined
+`WatchTable`; a modification flags every watcher `casDirty`, and `EXEC` then
+returns a nil array instead of running the queue. The subtlety is signalling "key
+modified" faithfully, because **in-place aggregate mutations do not re-store the
+value** — `LPUSH` on an existing list mutates the `ListValue` in place, so a
+`Database.put` hook would never see it. Two complementary signals close the gap:
+
+1. **An always-on `Database` `KeyspaceListener`** on `put`/`remove`/`setExpireAt`/
+   `persist`/`clear` catches creation, deletion, **expiration** (lazy and active,
+   since both route through `remove`), TTL changes, flush, and cross-db
+   `MOVE`/`COPY`.
+2. **A dispatcher arg-scan** after each successful write touches watched keys (in
+   the current db) that appear among the command's arguments — covering the
+   in-place-aggregate case, where the key is always an argument.
+
+Together they never *under*-touch (no lost update). The only over-approximation is
+an argument value colliding with a watched key's bytes, which aborts a transaction
+more eagerly than Redis — safe, and documented. The arg-scan is **O(args)** and
+short-circuits when no key in the db is watched (≈ 2 ns on the hot write path).
+`SWAPDB` re-indexes the swapped databases so the modification signal (which carries
+the db index) stays aligned with the slot under which watches are registered, and
+touches all watchers in both databases.
+
 ## Changelog
+
+### Phase 5B — Transactions
+- **`WatchTable`**: command-thread-confined `(db, key) → watchers` CAS table with a
+  per-connection `casDirty` flag; `touch`/`touchAll`/`touchByArguments`.
+- **`KeyspaceListener`** wired into `Database` (put/remove/setExpireAt/persist/
+  clear) to drive CAS invalidation on ambient modifications (expiration, flush,
+  cross-db writes); `Database` index made slot-aligned across `SWAPDB`.
+- **Dispatcher**: MULTI queueing (`+QUEUED`, EXECABORT on queue-time errors) and a
+  per-write arg-scan CAS touch; `ServerContext` now publishes the dispatcher so
+  `EXEC` can replay queued commands through it.
+- **`ClientConnection`**: transaction queue + `inMulti`/`transactionError`/
+  `casDirty` + watched-key set; `RESET` and disconnect clear them.
+- **Protocol**: added `RespValue.NullArray` (RESP2 `*-1`, RESP3 `_`) so `EXEC`'s
+  CAS-failure reply is a true nil multibulk, not a nil bulk.
+- **Commands** (`TransactionCommands`): `MULTI`/`EXEC`/`DISCARD`/`WATCH`/`UNWATCH`.
+- **Tests**: 11 end-to-end tests — ordered EXEC, DISCARD, CAS abort vs success,
+  different-key non-interference, in-place-mutation and expiration invalidation,
+  EXECABORT, runtime-error-doesn't-abort, WATCH-inside-MULTI, EXEC-without-MULTI,
+  and an 8-thread concurrent CAS-increment test (400 increments, 0 lost, 1697
+  contention retries).
+- **Benchmark**: per-write CAS bookkeeping ≈ 2 ns with no watchers (the common
+  path), ≈ 21 ns once watches exist — O(args), independent of watcher count.
 
 ### Phase 5A — Pub/Sub
 - **`ClientOutbox`**: one-way engine→network bridge for out-of-band pushes; the

@@ -33,6 +33,17 @@ public final class CommandDispatcher {
             "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE",
             "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET");
 
+    /**
+     * Commands executed immediately even inside {@code MULTI} (everything else is
+     * queued). {@code WATCH} is here so it can reject being called inside a
+     * transaction; {@code UNWATCH} is intentionally absent, so it queues like any
+     * normal command — matching Redis.
+     */
+    private static final Set<String> TRANSACTION_CONTROL =
+            Set.of("MULTI", "EXEC", "DISCARD", "WATCH", "RESET", "QUIT");
+
+    private static final RespValue QUEUED = RespValue.simple("QUEUED");
+
     private final ServerContext server;
 
     /**
@@ -56,24 +67,45 @@ public final class CommandDispatcher {
         }
         String upperName = ctx.argText(0).toUpperCase(Locale.ROOT);
         CommandSpec spec = server.registry().lookup(upperName);
+        ClientConnection conn = ctx.connection();
+        boolean queueing = conn.inMulti() && !TRANSACTION_CONTROL.contains(upperName);
 
         if (spec == null) {
+            if (queueing) {
+                conn.markTransactionError();
+            }
             return RespValue.error(unknownCommandMessage(ctx));
         }
+        if (server.requiresAuth()
+                && !conn.isAuthenticated()
+                && !NO_AUTH_COMMANDS.contains(upperName)) {
+            if (queueing) {
+                conn.markTransactionError();
+            }
+            return RespValue.error("NOAUTH Authentication required.");
+        }
+
+        // Inside MULTI: validate arity, then queue (or flag the transaction so EXEC
+        // aborts). Control commands fall through to immediate execution.
+        if (queueing) {
+            if (!spec.acceptsArgCount(ctx.argCount())) {
+                conn.markTransactionError();
+                return RespValue.error(
+                        "ERR wrong number of arguments for '" + spec.name() + "' command");
+            }
+            conn.queueCommand(ctx.args());
+            return QUEUED;
+        }
+
         if (!spec.acceptsArgCount(ctx.argCount())) {
             return RespValue.error(
                     "ERR wrong number of arguments for '" + spec.name() + "' command");
         }
-        if (server.requiresAuth()
-                && !ctx.connection().isAuthenticated()
-                && !NO_AUTH_COMMANDS.contains(upperName)) {
-            return RespValue.error("NOAUTH Authentication required.");
-        }
 
         // RESP2 subscriber mode: only the pub/sub control commands (plus PING/
         // QUIT/RESET) may run. RESP3 carries pushes out-of-band, so it is exempt.
-        if (ctx.connection().inSubscribeMode()
-                && ctx.connection().protocol() == RespVersion.RESP2
+        if (conn.inSubscribeMode()
+                && conn.protocol() == RespVersion.RESP2
                 && !SUBSCRIBE_MODE_COMMANDS.contains(upperName)) {
             return RespValue.error("ERR Can't execute '" + spec.name()
                     + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context");
@@ -86,17 +118,18 @@ public final class CommandDispatcher {
             }
         }
 
-        ctx.connection().setLastCommand(spec.name());
+        conn.setLastCommand(spec.name());
         try {
             RespValue reply = spec.handler().execute(ctx);
-            // After a successful write: count it toward RDB save points and feed
-            // the AOF. (Errors thrown above never reach here, so failed writes
-            // are neither counted nor propagated.)
+            // After a successful write: count it toward RDB save points, invalidate
+            // any WATCH on the touched keys, and feed the AOF. (Errors thrown above
+            // never reach here, so failed writes are neither counted nor propagated.)
             if (WriteCommands.isWrite(upperName)) {
                 server.markDirty(1);
+                server.watchTable().touchByArguments(conn.db(), ctx.args());
                 Persistence persistence = server.persistence();
                 if (persistence != null && persistence.appendOnlyEnabled()) {
-                    persistence.feedAppendOnly(ctx.connection().db(), ctx.args());
+                    persistence.feedAppendOnly(conn.db(), ctx.args());
                 }
             }
             return reply;

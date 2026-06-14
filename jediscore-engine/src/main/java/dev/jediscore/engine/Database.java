@@ -27,11 +27,12 @@ import java.util.function.LongSupplier;
  */
 public final class Database {
 
-    private final int index;
+    private int index;
     private final LongSupplier clock;
     private final Dict<RedisValue> dict = new Dict<>();
     private final Dict<Long> expires = new Dict<>();
     private long memoryUsed;
+    private KeyspaceListener listener = KeyspaceListener.NONE;
 
     /**
      * Creates a database.
@@ -44,9 +45,32 @@ public final class Database {
         this.clock = clock;
     }
 
-    /** @return the database index */
+    /** @return the database index (its current array slot) */
     public int index() {
         return index;
+    }
+
+    /**
+     * Reassigns this database's logical index. Called only by {@link ServerContext}
+     * after a {@code SWAPDB} swaps the array slots, so a database's reported index
+     * always matches the slot through which clients reach it — keeping the CAS
+     * modification signal (which carries the index) consistent with the slot under
+     * which watches are registered.
+     *
+     * @param index the new slot index
+     */
+    void reindex(int index) {
+        this.index = index;
+    }
+
+    /**
+     * Installs the keyspace-modification listener (wired once at startup to drive
+     * WATCH/CAS invalidation). Modifications signal the listener synchronously.
+     *
+     * @param listener the listener, or {@link KeyspaceListener#NONE} to disable
+     */
+    public void setListener(KeyspaceListener listener) {
+        this.listener = listener;
     }
 
     /**
@@ -107,6 +131,7 @@ public final class Database {
         } else {
             memoryUsed += value.estimateBytes() - old.estimateBytes();
         }
+        listener.onKeyModified(index, key);
     }
 
     /**
@@ -120,6 +145,7 @@ public final class Database {
         RedisValue old = dict.remove(key);
         if (old != null) {
             memoryUsed -= MemoryEstimator.usage(key, old);
+            listener.onKeyModified(index, key);
             return true;
         }
         return false;
@@ -150,6 +176,7 @@ public final class Database {
         dict.clear();
         expires.clear();
         memoryUsed = 0;
+        listener.onFlushed(index);
     }
 
     /**
@@ -174,6 +201,7 @@ public final class Database {
      */
     public void setExpireAt(Bytes key, long whenMillis) {
         expires.put(key, whenMillis);
+        listener.onKeyModified(index, key);
     }
 
     /**
@@ -193,7 +221,11 @@ public final class Database {
      * @return {@code true} if a TTL was removed
      */
     public boolean persist(Bytes key) {
-        return expires.remove(key) != null;
+        if (expires.remove(key) != null) {
+            listener.onKeyModified(index, key);
+            return true;
+        }
+        return false;
     }
 
     /** @return whether the key currently has an associated TTL */

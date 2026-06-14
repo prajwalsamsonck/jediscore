@@ -51,6 +51,14 @@ public sealed interface RespValue {
     /** RESP null. RESP3 renders {@code _\r\n}; RESP2 renders {@code $-1\r\n}. */
     record Null() implements RespValue {}
 
+    /**
+     * A null <em>array</em>. RESP3 renders {@code _\r\n} (unified null); RESP2
+     * renders {@code *-1\r\n}, which is distinct on the wire from a null bulk
+     * ({@code $-1}). Used where Redis replies with a nil multibulk — {@code EXEC}
+     * on a CAS failure, and blocking commands on timeout.
+     */
+    record NullArray() implements RespValue {}
+
     // ---- RESP3 additions -----------------------------------------------------
 
     /** A double: {@code ,3.14\r\n}. Downgrades to a bulk string in RESP2. */
@@ -107,6 +115,9 @@ public sealed interface RespValue {
 
     /** The canonical RESP null instance. */
     RespValue NULL = new Null();
+
+    /** The canonical RESP null-array instance (nil multibulk). */
+    RespValue NULL_ARRAY = new NullArray();
 
     /** Pre-built {@code +OK}. */
     RespValue OK = new SimpleString("OK");

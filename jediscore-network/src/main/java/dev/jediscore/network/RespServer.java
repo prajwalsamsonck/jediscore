@@ -48,6 +48,8 @@ public final class RespServer implements AutoCloseable {
     public RespServer(ServerContext context) {
         this.context = context;
         this.dispatcher = new CommandDispatcher(context);
+        // Publish the dispatcher so EXEC can replay queued commands through it.
+        context.setDispatcher(dispatcher);
     }
 
     /**

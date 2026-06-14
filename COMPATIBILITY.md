@@ -162,6 +162,20 @@ document, updated every phase as commands are implemented.
 | RESP3 push type | ✅ Done | Messages and confirmations are `>` pushes in RESP3, plain arrays in RESP2 (encoder downgrade). |
 | Subscriber-mode restriction | ✅ Done | RESP2 subscribers may only run `(P\|S)SUBSCRIBE`/`(P\|S)UNSUBSCRIBE`/`PING`/`QUIT`/`RESET`; `PING` replies in the `["pong", msg]` array form. RESP3 lifts the restriction. |
 
+### Transactions
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `MULTI` | ✅ Done | Nested `MULTI` → error; subsequent non-control commands reply `+QUEUED`. |
+| `EXEC` | ✅ Done | Runs queued commands in order, replies with the results array. CAS failure → nil array (`*-1`). `EXEC` without `MULTI` → error. |
+| `DISCARD` | ✅ Done | Drops the queue and unwatches; without `MULTI` → error. |
+| `WATCH` | ✅ Done | Optimistic lock; `WATCH` inside `MULTI` → error. |
+| `UNWATCH` | ✅ Done | Clears all watches and the CAS-dirty flag. |
+| Queue-time errors | ✅ Done | Unknown command / bad arity poisons the transaction → `EXEC` replies `-EXECABORT`. |
+| Runtime errors | ✅ Done | A queued command that errors at run time (e.g. `WRONGTYPE`) does not abort; its error is an element of the results array. |
+| CAS invalidation | ✅ Done | A watched key created/overwritten/deleted/expired (lazy or active), TTL-changed, in-place-mutated, flushed, or swapped invalidates the transaction. Conservative: a watched key whose bytes equal a non-key argument is also touched (aborts more eagerly than Redis, never misses a real change). |
+| AOF propagation | 🚧 Partial | An executed transaction's effective writes are propagated to the AOF individually, not wrapped in `MULTI`/`EXEC`. Replay is equivalent on the single command thread. |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

@@ -3,7 +3,9 @@ package dev.jediscore.engine;
 import dev.jediscore.datastructures.Bytes;
 import dev.jediscore.protocol.RespValue;
 import dev.jediscore.protocol.RespVersion;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -50,6 +52,21 @@ public final class ClientConnection {
     private final Set<Bytes> channels = new LinkedHashSet<>();
     private final Set<Bytes> patterns = new LinkedHashSet<>();
     private final Set<Bytes> shardChannels = new LinkedHashSet<>();
+
+    /**
+     * Transaction state (MULTI/EXEC). All command-thread-confined: {@link #inMulti}
+     * is set by {@code MULTI}; {@link #queuedCommands} accumulates the queued
+     * argument vectors; {@link #transactionError} records a queue-time error so
+     * {@code EXEC} aborts with {@code EXECABORT}; {@link #casDirty} records that a
+     * watched key changed so {@code EXEC} returns a nil array.
+     */
+    private boolean inMulti;
+    private final List<byte[][]> queuedCommands = new ArrayList<>();
+    private boolean transactionError;
+    private boolean casDirty;
+
+    /** The set of keys this connection is watching (for cleanup), keyed by (db, key). */
+    private final Set<WatchTable.WatchKey> watchedKeys = new LinkedHashSet<>();
 
     /**
      * Creates a connection record.
@@ -205,6 +222,71 @@ public final class ClientConnection {
         return shardChannels;
     }
 
+    // ---- transactions (MULTI/EXEC) ------------------------------------------
+
+    /** @return whether a transaction is open ({@code MULTI} issued, no {@code EXEC}/{@code DISCARD} yet) */
+    public boolean inMulti() {
+        return inMulti;
+    }
+
+    /** Opens a transaction; subsequent non-control commands are queued. */
+    public void beginMulti() {
+        this.inMulti = true;
+    }
+
+    /**
+     * Queues a command's argument vector for later execution by {@code EXEC}.
+     *
+     * @param args the argument vector
+     */
+    public void queueCommand(byte[][] args) {
+        queuedCommands.add(args);
+    }
+
+    /** @return the queued commands (live list; the caller copies before clearing) */
+    public List<byte[][]> queuedCommands() {
+        return queuedCommands;
+    }
+
+    /** Flags that a queued command failed to queue (unknown command / bad arity) → {@code EXECABORT}. */
+    public void markTransactionError() {
+        this.transactionError = true;
+    }
+
+    /** @return whether a queue-time error occurred during the current transaction */
+    public boolean hasTransactionError() {
+        return transactionError;
+    }
+
+    /** Ends the transaction: clears the MULTI flag, the queue, and the queue-time error flag. */
+    public void clearMulti() {
+        this.inMulti = false;
+        this.transactionError = false;
+        this.queuedCommands.clear();
+    }
+
+    // ---- WATCH / CAS ---------------------------------------------------------
+
+    /** @return the set of (db, key) pairs this connection watches (managed by {@link WatchTable}) */
+    public Set<WatchTable.WatchKey> watchedKeys() {
+        return watchedKeys;
+    }
+
+    /** Marks the connection's transaction as CAS-dirty (a watched key was modified). */
+    public void markCasDirty() {
+        this.casDirty = true;
+    }
+
+    /** @return whether a watched key was modified since {@code WATCH} */
+    public boolean isCasDirty() {
+        return casDirty;
+    }
+
+    /** Clears the CAS-dirty flag (on {@code UNWATCH}/{@code EXEC}/{@code DISCARD}). */
+    public void clearCasDirty() {
+        this.casDirty = false;
+    }
+
     /** @return whether the connection holds any subscription (channel, pattern, or shard) */
     public boolean inSubscribeMode() {
         return !channels.isEmpty() || !patterns.isEmpty() || !shardChannels.isEmpty();
@@ -239,5 +321,10 @@ public final class ClientConnection {
         this.channels.clear();
         this.patterns.clear();
         this.shardChannels.clear();
+        this.inMulti = false;
+        this.transactionError = false;
+        this.casDirty = false;
+        this.queuedCommands.clear();
+        this.watchedKeys.clear();
     }
 }

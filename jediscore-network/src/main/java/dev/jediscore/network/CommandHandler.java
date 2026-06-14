@@ -71,9 +71,12 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
         ClientConnection conn = ctx.channel().attr(ConnectionAttributes.CONNECTION).get();
         if (conn != null) {
             server.unregister(conn);
-            // Tear down pub/sub state on the command thread, where the registry
-            // lives, so it needs no locking.
-            server.executor().submit(() -> server.pubsub().removeAll(conn));
+            // Tear down pub/sub and WATCH state on the command thread, where those
+            // registries live, so they need no locking.
+            server.executor().submit(() -> {
+                server.pubsub().removeAll(conn);
+                server.watchTable().unwatchAll(conn);
+            });
         }
         super.channelInactive(ctx);
     }

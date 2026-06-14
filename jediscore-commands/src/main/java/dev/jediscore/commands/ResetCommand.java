@@ -18,9 +18,10 @@ public final class ResetCommand implements Command {
     @Override
     public RespValue execute(CommandContext ctx) {
         boolean authedAfter = !ctx.server().requiresAuth();
-        // Drop pub/sub state from the server-side indexes before clearing the
-        // connection's own sets, so the registry stays consistent.
+        // Drop pub/sub and WATCH state from the server-side indexes before clearing
+        // the connection's own sets, so those registries stay consistent.
         ctx.server().pubsub().removeAll(ctx.connection());
+        ctx.server().watchTable().unwatchAll(ctx.connection());
         ctx.connection().reset(authedAfter);
         return RespValue.simple("RESET");
     }
