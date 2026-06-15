@@ -111,6 +111,24 @@ public sealed interface RespValue {
     /** Attribute metadata preceding a value: {@code |1\r\n...}. Dropped (attached value only) in RESP2. */
     record Attribute(List<MapEntry> entries, RespValue attached) implements RespValue {}
 
+    /**
+     * Pre-encoded bytes written to the wire verbatim, regardless of protocol
+     * version. Used by replication to stream the RDB preamble (a bulk header with
+     * no trailing CRLF) and exact command bytes whose lengths must match the
+     * replication offset. Not produced by the parser.
+     */
+    record Raw(byte[] bytes) implements RespValue {
+        @Override public boolean equals(Object o) {
+            return o instanceof Raw r && Arrays.equals(bytes, r.bytes);
+        }
+        @Override public int hashCode() {
+            return Arrays.hashCode(bytes);
+        }
+        @Override public String toString() {
+            return "Raw[" + bytes.length + "B]";
+        }
+    }
+
     // ---- Singletons & factories ---------------------------------------------
 
     /** The canonical RESP null instance. */

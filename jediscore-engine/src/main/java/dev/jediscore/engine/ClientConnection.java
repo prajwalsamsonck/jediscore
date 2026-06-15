@@ -68,6 +68,12 @@ public final class ClientConnection {
     /** The set of keys this connection is watching (for cleanup), keyed by (db, key). */
     private final Set<WatchTable.WatchKey> watchedKeys = new LinkedHashSet<>();
 
+    /** Whether this connection has been turned into a replication stream (after PSYNC). */
+    private boolean replica;
+
+    /** The replica's announced listening port (from {@code REPLCONF listening-port}), or 0. */
+    private int replicaListeningPort;
+
     /**
      * Creates a connection record.
      *
@@ -285,6 +291,32 @@ public final class ClientConnection {
     /** Clears the CAS-dirty flag (on {@code UNWATCH}/{@code EXEC}/{@code DISCARD}). */
     public void clearCasDirty() {
         this.casDirty = false;
+    }
+
+    // ---- replication ---------------------------------------------------------
+
+    /** Marks this connection as a replica receiving the replication stream (after {@code PSYNC}). */
+    public void markReplica() {
+        this.replica = true;
+    }
+
+    /** @return whether this connection is a replica receiving the replication stream */
+    public boolean isReplica() {
+        return replica;
+    }
+
+    /**
+     * Records the replica's announced listening port.
+     *
+     * @param port the port from {@code REPLCONF listening-port}
+     */
+    public void setReplicaListeningPort(int port) {
+        this.replicaListeningPort = port;
+    }
+
+    /** @return the replica's announced listening port, or 0 if not announced */
+    public int replicaListeningPort() {
+        return replicaListeningPort;
     }
 
     /** @return whether the connection holds any subscription (channel, pattern, or shard) */

@@ -23,6 +23,7 @@ public final class ServerContext {
     private final PubSubRegistry pubsub = new PubSubRegistry();
     private final WatchTable watchTable;
     private final BlockingManager blocking;
+    private final ReplicationManager replication;
     private CommandDispatcher dispatcher;
     private Persistence persistence;
     private long dirty;
@@ -53,6 +54,7 @@ public final class ServerContext {
             databases[i].setListener(casListener);
         }
         this.blocking = new BlockingManager(this);
+        this.replication = new ReplicationManager(config.runId());
     }
 
     /**
@@ -161,11 +163,17 @@ public final class ServerContext {
         return blocking;
     }
 
+    /** @return the master-side replication manager (command-thread confined) */
+    public ReplicationManager replication() {
+        return replication;
+    }
+
     /**
-     * Propagates the side effects of a write that happened outside the dispatcher's
-     * own write-tracking — namely a blocking command being served. Marks the
-     * dataset dirty, invalidates WATCHes on the affected keys, and feeds the AOF
-     * the <em>effective</em> command (e.g. {@code LPOP}, never {@code BLPOP}).
+     * Propagates the full side effects of a write that happened outside the
+     * dispatcher's own write-tracking — namely a blocking command being served:
+     * marks the dataset dirty, invalidates WATCHes, and propagates the
+     * <em>effective</em> command (e.g. {@code LPOP}, never {@code BLPOP}) to the
+     * AOF and replicas.
      *
      * @param db   the database index the write applied to
      * @param args the effective command's argument vector
@@ -173,9 +181,23 @@ public final class ServerContext {
     public void propagateWrite(int db, byte[][] args) {
         markDirty(1);
         watchTable.touchByArguments(db, args);
+        propagateEffect(db, args);
+    }
+
+    /**
+     * Propagates a single effective command to the AOF and the replication stream.
+     * Unlike {@link #propagateWrite}, it does <em>not</em> touch the dirty counter
+     * or WATCH table — those are accounted once per original command by the
+     * dispatcher, even when the command rewrites itself into several.
+     *
+     * @param db   the database index
+     * @param args the effective command's argument vector
+     */
+    public void propagateEffect(int db, byte[][] args) {
         if (persistence != null && persistence.appendOnlyEnabled()) {
             persistence.feedAppendOnly(db, args);
         }
+        replication.propagate(db, args);
     }
 
     /** @return the command dispatcher (used by {@code EXEC} to replay queued commands) */

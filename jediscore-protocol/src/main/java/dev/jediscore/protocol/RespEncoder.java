@@ -65,6 +65,7 @@ public final class RespEncoder {
             case RespValue.Array a -> writeAggregate(out, '*', a.items(), version);
             case RespValue.Null ignored -> out.writeBytes(resp3 ? NULL_RESP3 : NULL_RESP2);
             case RespValue.NullArray ignored -> out.writeBytes(resp3 ? NULL_RESP3 : NULL_ARRAY_RESP2);
+            case RespValue.Raw raw -> out.writeBytes(raw.bytes()); // verbatim, version-independent
             case RespValue.Double d -> {
                 if (resp3) {
                     out.writeByte(',');

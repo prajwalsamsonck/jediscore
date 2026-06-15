@@ -70,6 +70,14 @@ public interface Persistence {
     /** @return whether an AOF rewrite is currently running */
     boolean appendRewriteInProgress();
 
+    /**
+     * Serializes the current keyspace to an in-memory RDB image, for a replication
+     * full resync. Runs synchronously on the command thread.
+     *
+     * @return the RDB bytes
+     */
+    byte[] dumpRdb();
+
     /** Stops background workers and flushes/closes the AOF. */
     void shutdown();
 }

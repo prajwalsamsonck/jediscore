@@ -8,13 +8,15 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 5 complete — **advanced command semantics**: **Lua scripting**
-> (EVAL/EVALSHA/SCRIPT, `redis.call`/`pcall`, sandboxed LuaJ), **blocking commands**
-> (BLPOP/BLMOVE/BLMPOP/BZPOP/WAIT on an event-driven FIFO wait-queue), **transactions**
-> (MULTI/EXEC/WATCH optimistic locking), and **Pub/Sub** (channels/patterns/sharded +
-> RESP3 push). On top of **AOF + RDB persistence**, all five data types, the `SCAN`
-> family, two-tier expiration, memory accounting, and `maxmemory` eviction. Next:
-> replication (PSYNC).
+> **Status:** Phase 6A complete — **master-side replication**: the `PSYNC`
+> full-resync handshake (stream the RDB, then the live command stream), a
+> replication backlog + offset, `REPLCONF`/ACK, deterministic command rewriting
+> (`EXPIRE`→`PEXPIREAT`, `SPOP`→`SREM`), `WAIT`, and `INFO replication`/`ROLE` —
+> **a real `redis-server` replicates from our master** and converges exactly. On
+> top of Phase 5 **advanced semantics** (Lua scripting, blocking commands,
+> transactions, Pub/Sub), **AOF + RDB persistence**, all five data types, `SCAN`,
+> expiration, memory accounting, and eviction. Next: the replica side (REPLICAOF),
+> then partial resync + Sentinel.
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text

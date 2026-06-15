@@ -8,6 +8,7 @@ import dev.jediscore.engine.CommandRegistry;
 import dev.jediscore.engine.CommandSpec;
 import dev.jediscore.engine.Database;
 import dev.jediscore.protocol.RespValue;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -124,12 +125,17 @@ public final class SetCommands {
 
         if (ctx.argCount() == 2) {
             if (set == null) {
+                ctx.suppressPropagation();
                 return RespValue.NULL;
             }
             byte[] member = set.popRandom();
-            if (set.size() == 0) {
+            boolean emptied = set.size() == 0;
+            if (emptied) {
                 db.remove(key);
             }
+            // SPOP is non-deterministic; propagate the concrete removal so replicas
+            // and the AOF stay consistent with this master.
+            propagateRemoval(ctx, key, emptied, List.of(member));
             return RespValue.bulk(member);
         }
         if (ctx.argCount() > 3) {
@@ -140,16 +146,41 @@ public final class SetCommands {
             throw new CommandException("ERR value is out of range, must be positive");
         }
         if (set == null) {
+            ctx.suppressPropagation();
             return new RespValue.Array(List.of());
         }
         List<RespValue> out = new ArrayList<>();
+        List<byte[]> popped = new ArrayList<>();
         for (long i = 0; i < count && set.size() > 0; i++) {
-            out.add(RespValue.bulk(set.popRandom()));
+            byte[] member = set.popRandom();
+            popped.add(member);
+            out.add(RespValue.bulk(member));
         }
-        if (set.size() == 0) {
+        boolean emptied = set.size() == 0;
+        if (emptied) {
             db.remove(key);
         }
+        if (popped.isEmpty()) {
+            ctx.suppressPropagation();
+        } else {
+            propagateRemoval(ctx, key, emptied, popped);
+        }
         return new RespValue.Array(out);
+    }
+
+    /** Propagates an SPOP's effect as a deterministic {@code SREM} (or {@code DEL} if emptied). */
+    private static void propagateRemoval(CommandContext ctx, Bytes key, boolean emptied, List<byte[]> members) {
+        if (emptied) {
+            ctx.propagate(new byte[][]{"DEL".getBytes(StandardCharsets.UTF_8), key.array()});
+            return;
+        }
+        byte[][] srem = new byte[2 + members.size()][];
+        srem[0] = "SREM".getBytes(StandardCharsets.UTF_8);
+        srem[1] = key.array();
+        for (int i = 0; i < members.size(); i++) {
+            srem[2 + i] = members.get(i);
+        }
+        ctx.propagate(srem);
     }
 
     private static RespValue srandmember(CommandContext ctx) {

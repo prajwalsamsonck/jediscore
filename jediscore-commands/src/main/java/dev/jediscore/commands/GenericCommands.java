@@ -109,6 +109,7 @@ public final class GenericCommands {
 
         Database db = ctx.database();
         if (!db.containsKey(key)) {
+            ctx.suppressPropagation();
             return RespValue.integer(0);
         }
         Long current = db.getExpireAt(key);
@@ -116,14 +117,24 @@ public final class GenericCommands {
                 || (xx && current == null)
                 || (gt && (current == null || whenMillis <= current))
                 || (lt && current != null && whenMillis >= current)) {
+            ctx.suppressPropagation();
             return RespValue.integer(0);
         }
         if (whenMillis <= now) {
             db.remove(key); // already in the past: delete immediately, as Redis does
+            // Propagate as an unconditional DEL for determinism.
+            ctx.propagate(new byte[][]{bytes("DEL"), key.array()});
             return RespValue.integer(1);
         }
         db.setExpireAt(key, whenMillis);
+        // Propagate as an absolute PEXPIREAT so replicas/AOF are time-independent.
+        ctx.propagate(new byte[][]{bytes("PEXPIREAT"), key.array(),
+                bytes(Long.toString(whenMillis))});
         return RespValue.integer(1);
+    }
+
+    private static byte[] bytes(String s) {
+        return s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static RespValue ttlGeneric(CommandContext ctx, boolean millis) {

@@ -204,6 +204,22 @@ document, updated every phase as commands are implemented.
 | `FUNCTION` (Redis 7 functions) | 📋 Deferred | Not implemented; the spec marks it optional. |
 | Lua version | 🚧 Partial | LuaJ implements Lua 5.1 (as Redis does); `cjson`/`cmsgpack`/`struct`/`bit` helper libraries are not bundled. |
 
+### Replication (master side — Phase 6A)
+
+| Command / feature | Status | Notes |
+|---------|--------|-------|
+| `PSYNC` (full resync) | ✅ Done | Replies `+FULLRESYNC <replid> <offset>`, streams the RDB (`$<len>\r\n…`), then the live command stream. A real `redis-server` replicates from us (verified). |
+| `PSYNC` (partial resync) | 📋 Phase 6C | Backlog ring buffer is in place; `CONTINUE` is served in 6C. |
+| Legacy `SYNC` | ✅ Done | Sends the RDB without the `FULLRESYNC` line. |
+| `REPLCONF` | ✅ Done | `listening-port`, `capa`, `ACK <offset>`, `GETACK`; lenient on unknown options. |
+| Command propagation | ✅ Done | Shared stream with `SELECT` on db change; offset + backlog advance once a replica has attached. |
+| Deterministic rewriting | 🚧 Partial | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL` (verified converging on a real replica). `SETEX`/`SET EX`/`INCRBYFLOAT` etc. still propagate verbatim — expanded in 6C. The same rewrite now also feeds the AOF. |
+| `WAIT` | ✅ Done | Counts replicas acked at the target offset; sends `GETACK` and blocks on the wait-queue until enough ack or timeout. |
+| `INFO replication` | ✅ Done | `role:master`, `connected_slaves`, `slaveN:…`, `master_replid`, `master_repl_offset`, backlog fields. |
+| `ROLE` | ✅ Done | `["master", offset, [[ip, port, ack-offset], …]]`. |
+| `REPLICAOF`/`SLAVEOF` | 🚧 Partial | `NO ONE` → `OK`; becoming a replica of another master is Phase 6B. |
+| Replica read-only / serving reads | 📋 Phase 6B | |
+
 <!--
   Maintenance: as each command lands, add a row above with its status and any
   behavioural notes (edge cases, RESP3 differences, deviations from Redis). Group

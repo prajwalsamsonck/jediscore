@@ -582,7 +582,92 @@ string would wrongly become an integer. Strings are converted **binary-safe** vi
 uncaught error becomes the script's reply); `redis.pcall` returns the `{err=…}`
 table instead.
 
+## Replication — master side (Phase 6A)
+
+### PSYNC full resync, gap-free
+
+When a replica sends `PSYNC ? -1`, the master — in a single command-thread step —
+captures the current `master_repl_offset`, replies `+FULLRESYNC <replid> <offset>`,
+streams the RDB as a bulk header with no trailing CRLF (`$<len>\r\n` + payload),
+and registers the connection as a replica. Because the snapshot and the
+registration happen without any other command interleaving (single writer), there
+is **no gap** between the point the RDB represents and where the live stream
+begins.
+
+```mermaid
+sequenceDiagram
+    participant R as Replica
+    participant M as Master (command thread)
+    R->>M: PING / REPLCONF listening-port / capa
+    M-->>R: +PONG / +OK
+    R->>M: PSYNC ? -1
+    M-->>R: +FULLRESYNC <replid> <offset>
+    M-->>R: $<len>\r\n<RDB bytes>
+    M->>M: attach replica at <offset>
+    Note over M,R: every subsequent write streams as RESP
+    R->>M: REPLCONF ACK <offset>   (periodically)
+```
+
+The RDB is produced via a new `Persistence.dumpRdb()` SPI (the engine stays
+unaware of the file format). Streaming reuses the pub/sub delivery path: a new
+`RespValue.Raw` carries pre-encoded bytes verbatim, so the encoder writes the RDB
+preamble and exact command bytes without reframing — which matters because the
+**replication offset is a byte count** and must match what the replica computes.
+
+### The stream, the offset, and the backlog
+
+Propagation is a single shared byte sequence shared by all replicas: each write is
+encoded once, the offset advances by its length, the bytes are appended to a
+`ReplicationBacklog` ring buffer, and pushed to every replica. A `SELECT` is
+injected on a database change; attaching a replica resets that state so the first
+command re-selects (guarding a freshly-synced replica that assumes db 0). A server
+that has never had a replica pays nothing — the stream activates on first attach,
+then stays active across reconnects so a brief drop can be served by a partial
+resync (Phase 6C).
+
+### Deterministic propagation (and the rewriting framework)
+
+Non-deterministic commands must be rewritten so replicas and the AOF converge.
+`CommandContext.propagate(cmd)` lets a handler replace what is propagated; the
+dispatcher feeds the override (or the verbatim command) to **both** the AOF and the
+replication stream — one mechanism, so it also closed the determinism gap the AOF
+had in 4B. 6A rewrites `EXPIRE`-family → `PEXPIREAT` (absolute) and `SPOP` →
+`SREM`/`DEL` (the actually-removed members); verified against a real replica, whose
+set converged to the exact same members the master kept. `WAIT` solicits acks with
+`REPLCONF GETACK *` and counts replicas whose acknowledged offset reaches the
+target, blocking on the Phase 5C wait-queue until enough ack or the timeout fires.
+
+### Consistency model (honest)
+
+Replication is **asynchronous**: a write is acknowledged to the client as soon as
+the master applies it, *before* any replica has received it. So a master crash can
+lose the most recent writes that had not yet reached a replica — the standard Redis
+async-replication window. `WAIT n timeout` lets a client bound this by blocking
+until `n` replicas acknowledge, but even `WAIT` is best-effort (it can time out and
+report fewer). There is no synchronous replication and no automatic failover yet
+(Sentinel is Phase 6C). A replica reflects the master's state at some recent offset;
+under load it lags by the network + apply latency.
+
 ## Changelog
+
+### Phase 6A — Replication (master side)
+- **`ReplicationManager`** (engine, command-thread-confined): replid (from run id),
+  `master_repl_offset`, attached-replica set, shared propagation stream with
+  `SELECT` injection, and a `ReplicationBacklog` ring buffer.
+- **`PSYNC`/`SYNC`** full resync (gap-free), **`REPLCONF`** (listening-port/capa/
+  ACK/GETACK), **`INFO replication`**, **`ROLE`**, and a `REPLICAOF` stub.
+- **`RespValue.Raw`** for verbatim byte streaming (RDB preamble + exact command
+  bytes); **`Persistence.dumpRdb()`** SPI for the full-resync image.
+- **Propagation-rewrite framework** (`CommandContext.propagate`/`suppressPropagation`)
+  feeding both the AOF and replicas; `EXPIRE`-family→`PEXPIREAT` and `SPOP`→`SREM`
+  rewrites; **`WAIT`** now counts real replica acks.
+- **Tests**: 6 master-side tests via a raw-socket replica (full resync + stream,
+  `PEXPIREAT` and `SREM` rewriting, `WAIT`, `INFO`/`ROLE`); plus a manual
+  cross-compat run where a **real Redis 7.4 replica synced from our master**, took
+  the live stream, and converged exactly (incl. `SPOP`→`SREM` determinism and
+  `EXPIRE`→absolute TTL).
+- **Benchmark**: per-write propagation ≈ 0.5 µs (encode + backlog + fan-out),
+  independent of replica count; zero when no replica has ever attached.
 
 ### Phase 5D — Lua scripting
 - **`ScriptingCommands`**: `EVAL`/`EVALSHA`/`SCRIPT LOAD`/`EXISTS`/`FLUSH` on an

@@ -11,6 +11,7 @@ import dev.jediscore.engine.CommandException;
 import dev.jediscore.engine.CommandRegistry;
 import dev.jediscore.engine.CommandSpec;
 import dev.jediscore.engine.Database;
+import dev.jediscore.engine.ReplicationManager;
 import dev.jediscore.engine.ServerContext;
 import dev.jediscore.protocol.RespValue;
 import java.nio.charset.StandardCharsets;
@@ -245,16 +246,25 @@ public final class BlockingCommands {
         if (timeoutMillis < 0) {
             throw new CommandException("ERR timeout is negative");
         }
-        int acked = 0; // no replication yet: zero replicas have acknowledged
-        if (numReplicas <= acked || !ctx.blockingAllowed()) {
-            return RespValue.integer(acked);
+        ReplicationManager replication = ctx.server().replication();
+        long target = replication.masterReplOffset();
+        if (replication.replicasAckedAtLeast(target) >= numReplicas || !ctx.blockingAllowed()) {
+            return RespValue.integer(replication.replicasAckedAtLeast(target));
+        }
+        // Solicit acknowledgements so replicas report their current offset promptly.
+        if (replication.replicaCount() > 0) {
+            replication.propagateRaw(new byte[][]{
+                    "REPLCONF".getBytes(StandardCharsets.UTF_8),
+                    "GETACK".getBytes(StandardCharsets.UTF_8),
+                    "*".getBytes(StandardCharsets.UTF_8)});
         }
         BlockingOp op = new BlockingOp() {
             @Override public RespValue attempt(ServerContext server, ClientConnection conn) {
-                return null; // never satisfiable without replicas
+                int acked = replication.replicasAckedAtLeast(target);
+                return acked >= numReplicas ? RespValue.integer(acked) : null;
             }
             @Override public RespValue timeoutReply() {
-                return RespValue.integer(acked);
+                return RespValue.integer(replication.replicasAckedAtLeast(target));
             }
         };
         ctx.server().blocking().block(ctx.connection(), ctx.connection().db(),

@@ -127,9 +127,15 @@ public final class CommandDispatcher {
             if (WriteCommands.isWrite(upperName)) {
                 server.markDirty(1);
                 server.watchTable().touchByArguments(conn.db(), ctx.args());
-                Persistence persistence = server.persistence();
-                if (persistence != null && persistence.appendOnlyEnabled()) {
-                    persistence.feedAppendOnly(conn.db(), ctx.args());
+                // Propagate to the AOF and replicas: the command's deterministic
+                // rewrite if it set one, otherwise the verbatim command.
+                java.util.List<byte[][]> override = ctx.propagationOverride();
+                if (override == null) {
+                    server.propagateEffect(conn.db(), ctx.args());
+                } else {
+                    for (byte[][] cmd : override) {
+                        server.propagateEffect(conn.db(), cmd);
+                    }
                 }
                 // A write (e.g. RPUSH) may make a key ready for a blocked BLPOP.
                 if (server.blocking().hasBlockedClients()) {

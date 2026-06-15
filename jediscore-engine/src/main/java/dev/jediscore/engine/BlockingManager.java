@@ -126,6 +126,32 @@ public final class BlockingManager {
     }
 
     /**
+     * Re-attempts every active blocked client. Used when a condition that is not a
+     * keyspace write changes — currently a {@code REPLCONF ACK} that may satisfy a
+     * pending {@code WAIT}. Clients waiting on keys simply re-check and stay blocked
+     * if their key is still empty (the attempt is idempotent).
+     */
+    public void signalAll() {
+        if (active.isEmpty()) {
+            return;
+        }
+        for (BlockedClient bc : new ArrayList<>(active.values())) {
+            if (bc.served) {
+                continue;
+            }
+            RespValue reply;
+            try {
+                reply = bc.op.attempt(server, bc.conn);
+            } catch (CommandException e) {
+                reply = RespValue.error(e.getMessage());
+            }
+            if (reply != null) {
+                finish(bc, reply, true);
+            }
+        }
+    }
+
+    /**
      * Cancels any block held by a connection (on disconnect or {@code RESET}); no
      * reply is delivered.
      *

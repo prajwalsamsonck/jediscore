@@ -162,6 +162,17 @@ public final class RdbPersistence implements Persistence {
     }
 
     @Override
+    public byte[] dumpRdb() {
+        try {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            RdbWriter.write(Snapshots.of(context, false), out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RdbException("replication RDB dump failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public void shutdown() {
         aof.close();
         backgroundExecutor.shutdown();

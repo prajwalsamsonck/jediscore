@@ -14,6 +14,7 @@ public final class CommandContext {
     private final ClientConnection connection;
     private final byte[][] args;
     private final boolean blockingAllowed;
+    private java.util.List<byte[][]> propagationOverride;
 
     /**
      * Creates a context in which blocking commands may block.
@@ -47,6 +48,40 @@ public final class CommandContext {
     /** @return whether a blocking command issued in this context may park the client */
     public boolean blockingAllowed() {
         return blockingAllowed;
+    }
+
+    /**
+     * Overrides what is propagated to the AOF and replicas for this command, so a
+     * non-deterministic command rewrites itself to a deterministic form (e.g.
+     * {@code EXPIRE}→{@code PEXPIREAT}, {@code SPOP}→{@code SREM}). May be called
+     * more than once to propagate several commands; calling it at all suppresses
+     * the verbatim propagation.
+     *
+     * @param command the command to propagate instead of the verbatim one
+     */
+    public void propagate(byte[][] command) {
+        if (propagationOverride == null) {
+            propagationOverride = new java.util.ArrayList<>(2);
+        }
+        propagationOverride.add(command);
+    }
+
+    /**
+     * Suppresses propagation entirely for this command (a write that turned out to
+     * be a no-op, e.g. {@code SPOP} on a missing key).
+     */
+    public void suppressPropagation() {
+        if (propagationOverride == null) {
+            propagationOverride = new java.util.ArrayList<>(0);
+        }
+    }
+
+    /**
+     * @return the explicit propagation override (an empty list suppresses
+     *         propagation entirely), or {@code null} to propagate verbatim
+     */
+    public java.util.List<byte[][]> propagationOverride() {
+        return propagationOverride;
     }
 
     /** @return the server context */
