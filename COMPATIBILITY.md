@@ -204,21 +204,22 @@ document, updated every phase as commands are implemented.
 | `FUNCTION` (Redis 7 functions) | 📋 Deferred | Not implemented; the spec marks it optional. |
 | Lua version | 🚧 Partial | LuaJ implements Lua 5.1 (as Redis does); `cjson`/`cmsgpack`/`struct`/`bit` helper libraries are not bundled. |
 
-### Replication (master side — Phase 6A)
+### Replication (Phases 6A master, 6B replica)
 
 | Command / feature | Status | Notes |
 |---------|--------|-------|
-| `PSYNC` (full resync) | ✅ Done | Replies `+FULLRESYNC <replid> <offset>`, streams the RDB (`$<len>\r\n…`), then the live command stream. A real `redis-server` replicates from us (verified). |
-| `PSYNC` (partial resync) | 📋 Phase 6C | Backlog ring buffer is in place; `CONTINUE` is served in 6C. |
+| `PSYNC` (full resync) | ✅ Done | Both directions verified against real Redis 7.4: a real `redis-server` replicates from us, and we replicate from a real master (incl. **diskless `$EOF:`** RDB transfer). |
+| `PSYNC` (partial resync) | 📋 Phase 6C | Backlog ring buffer is in place; `CONTINUE` is served in 6C (a reconnect currently does a full resync). |
 | Legacy `SYNC` | ✅ Done | Sends the RDB without the `FULLRESYNC` line. |
 | `REPLCONF` | ✅ Done | `listening-port`, `capa`, `ACK <offset>`, `GETACK`; lenient on unknown options. |
+| `REPLICAOF`/`SLAVEOF` | ✅ Done | `host port` connects out, syncs, and applies the stream; `NO ONE` promotes back to master (dataset retained). |
+| Replica read-only mode | ✅ Done | Client writes rejected with `READONLY`; the master-link applying the stream is exempt. Reads served normally. |
 | Command propagation | ✅ Done | Shared stream with `SELECT` on db change; offset + backlog advance once a replica has attached. |
-| Deterministic rewriting | 🚧 Partial | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL` (verified converging on a real replica). `SETEX`/`SET EX`/`INCRBYFLOAT` etc. still propagate verbatim — expanded in 6C. The same rewrite now also feeds the AOF. |
+| Deterministic rewriting | 🚧 Partial | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL` (verified converging on a real replica). `SETEX`/`SET EX`/`INCRBYFLOAT` etc. still propagate verbatim — expanded in 6C. The same rewrite also feeds the AOF. |
 | `WAIT` | ✅ Done | Counts replicas acked at the target offset; sends `GETACK` and blocks on the wait-queue until enough ack or timeout. |
-| `INFO replication` | ✅ Done | `role:master`, `connected_slaves`, `slaveN:…`, `master_replid`, `master_repl_offset`, backlog fields. |
-| `ROLE` | ✅ Done | `["master", offset, [[ip, port, ack-offset], …]]`. |
-| `REPLICAOF`/`SLAVEOF` | 🚧 Partial | `NO ONE` → `OK`; becoming a replica of another master is Phase 6B. |
-| Replica read-only / serving reads | 📋 Phase 6B | |
+| `INFO replication` | ✅ Done | Master: `role:master`, `connected_slaves`, `slaveN:…`. Replica: `role:slave`, `master_host`/`port`, `master_link_status`, `slave_repl_offset`. |
+| `ROLE` | ✅ Done | Master `["master", offset, [[ip,port,ack],…]]`; replica `["slave", host, port, state, offset]`. |
+| Replica keepalives | ✅ Done | Bare-`\n` keepalives in the stream are skipped and counted toward the offset, matching Redis. |
 
 <!--
   Maintenance: as each command lands, add a row above with its status and any

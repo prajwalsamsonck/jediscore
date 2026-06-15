@@ -25,6 +25,7 @@ public final class ServerContext {
     private final BlockingManager blocking;
     private final ReplicationManager replication;
     private CommandDispatcher dispatcher;
+    private MasterLink masterLink;
     private Persistence persistence;
     private long dirty;
 
@@ -166,6 +167,20 @@ public final class ServerContext {
     /** @return the master-side replication manager (command-thread confined) */
     public ReplicationManager replication() {
         return replication;
+    }
+
+    /** @return the replica-side link to a master, or {@code null} if not wired */
+    public MasterLink masterLink() {
+        return masterLink;
+    }
+
+    /**
+     * Attaches the replica-side link (called once during startup wiring).
+     *
+     * @param masterLink the link
+     */
+    public void setMasterLink(MasterLink masterLink) {
+        this.masterLink = masterLink;
     }
 
     /**

@@ -60,6 +60,16 @@ public final class ReplicationManager {
     private int streamSelectedDb = -1; // forces a SELECT before the first command
     private boolean active;            // true once any replica has ever attached
 
+    // ---- replica-side state (when this server is itself a replica) -----------
+    // Written by the replica-link thread, read by INFO/ROLE/read-only on the
+    // command thread, so these are volatile.
+    private volatile boolean replicaRole;
+    private volatile String masterHost;
+    private volatile int masterPort;
+    private volatile String linkStatus = "connect";
+    private volatile long replicaOffset;
+    private volatile String masterReplIdSeen;
+
     /**
      * Creates a manager with a fresh replication ID derived from the run id.
      *
@@ -206,6 +216,85 @@ public final class ReplicationManager {
     private void feed(byte[] bytes) {
         backlog.append(bytes);
         masterReplOffset += bytes.length;
+    }
+
+    // ---- replica-side API ----------------------------------------------------
+
+    /** @return whether this server is currently a replica of another master */
+    public boolean isReplica() {
+        return replicaRole;
+    }
+
+    /**
+     * Marks this server a replica of {@code host:port} (from {@code REPLICAOF}).
+     *
+     * @param host the master host
+     * @param port the master port
+     */
+    public void becomeReplica(String host, int port) {
+        this.replicaRole = true;
+        this.masterHost = host;
+        this.masterPort = port;
+        this.linkStatus = "connect";
+    }
+
+    /** Reverts to being a master (from {@code REPLICAOF NO ONE}). */
+    public void becomeMaster() {
+        this.replicaRole = false;
+        this.masterHost = null;
+        this.linkStatus = "connect";
+    }
+
+    /** @return the master host, or {@code null} if a master */
+    public String masterHost() {
+        return masterHost;
+    }
+
+    /** @return the master port */
+    public int masterPort() {
+        return masterPort;
+    }
+
+    /** @return the replication link status ({@code connect}/{@code sync}/{@code connected}/{@code down}) */
+    public String linkStatus() {
+        return linkStatus;
+    }
+
+    /**
+     * Updates the link status (called by the replica link).
+     *
+     * @param status the new status
+     */
+    public void setLinkStatus(String status) {
+        this.linkStatus = status;
+    }
+
+    /** @return the offset this replica has processed from its master's stream */
+    public long replicaOffset() {
+        return replicaOffset;
+    }
+
+    /**
+     * Records the replica's processed offset (called by the replica link).
+     *
+     * @param offset the offset
+     */
+    public void setReplicaOffset(long offset) {
+        this.replicaOffset = offset;
+    }
+
+    /** @return the master's replication id observed at the last sync, or {@code null} */
+    public String masterReplIdSeen() {
+        return masterReplIdSeen;
+    }
+
+    /**
+     * Records the master's replication id observed during a sync.
+     *
+     * @param replId the master's replication id
+     */
+    public void setMasterReplIdSeen(String replId) {
+        this.masterReplIdSeen = replId;
     }
 
     /** Encodes a command as a RESP multibulk frame. */

@@ -173,6 +173,18 @@ public final class RdbPersistence implements Persistence {
     }
 
     @Override
+    public void loadReplicaRdb(byte[] rdb) {
+        for (int i = 0; i < context.databaseCount(); i++) {
+            context.database(i).clear();
+        }
+        try (InputStream in = new java.io.ByteArrayInputStream(rdb)) {
+            Snapshots.loadRdbStream(in, context);
+        } catch (IOException e) {
+            throw new RdbException("replica RDB load failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public void shutdown() {
         aof.close();
         backgroundExecutor.shutdown();

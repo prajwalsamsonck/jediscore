@@ -648,7 +648,64 @@ report fewer). There is no synchronous replication and no automatic failover yet
 (Sentinel is Phase 6C). A replica reflects the master's state at some recent offset;
 under load it lags by the network + apply latency.
 
+## Replication — replica side (Phase 6B)
+
+`REPLICAOF host port` hands off to a `ReplicaLink` (in `jediscore-replication`,
+behind the engine's `MasterLink` interface). A single daemon thread owns the
+outbound socket: it performs the `PING`/`REPLCONF`/`PSYNC` handshake, reads the
+master's RDB, and then the command stream — but it **never touches the keyspace
+directly**. The RDB load and every applied command are *submitted to the command
+thread*, so the single-writer invariant is preserved even though replication I/O
+runs on its own thread.
+
+```mermaid
+sequenceDiagram
+    participant L as ReplicaLink thread
+    participant M as Master
+    participant C as Command thread
+    L->>M: PING / REPLCONF / PSYNC ? -1
+    M-->>L: +FULLRESYNC <replid> <offset> + RDB
+    L->>C: submit loadReplicaRdb(bytes)   (flush + load)
+    loop stream
+        M-->>L: SET / SELECT / … (and \n keepalives)
+        L->>C: submit dispatch(masterLink, cmd)
+        Note over L: offset += frame bytes
+        M-->>L: REPLCONF GETACK *
+        L-->>M: REPLCONF ACK <offset>
+    end
+```
+
+Applied commands run through the normal dispatcher on a synthetic **master-link
+connection** flagged to bypass read-only; `SELECT` frames in the stream set that
+connection's database, so writes land in the right db. The replica counts the
+exact bytes it consumes (the `RespParser` resets its reader index on a partial
+frame, so a frame's length is an exact reader-index delta), answers `REPLCONF
+GETACK` immediately, and reconnects with a full resync if the link drops.
+
+Two real-Redis wrinkles the link handles: **bare `\n` keepalives** (skipped in the
+handshake and in the stream, counted toward the offset) and **diskless `$EOF:`
+transfer** — when the master streams the RDB with no length prefix, the payload
+runs until a random 40-byte marker reappears, read byte-by-byte so the command
+stream that follows is never over-consumed. **Read-only mode** rejects client
+writes with `READONLY` while a replica; `INFO`/`ROLE` report the slave fields.
+
 ## Changelog
+
+### Phase 6B — Replication (replica side)
+- **`ReplicaLink`** (`jediscore-replication`, implements the engine's new
+  `MasterLink`): outbound handshake, RDB load, stream apply, `REPLCONF ACK`/
+  `GETACK`, reconnect-with-full-resync; submits all keyspace changes to the command
+  thread.
+- **Replica state** in `ReplicationManager` (role, master host/port, link status,
+  replica offset, observed master replid); **read-only** enforcement in the
+  dispatcher (master-link exempt); `Persistence.loadReplicaRdb` SPI (flush + load).
+- **`REPLICAOF`/`SLAVEOF`** wired to the link; `INFO`/`ROLE` report replica fields.
+- Handles real-Redis **diskless `$EOF:` RDB** transfer and **`\n` keepalives**.
+- **Tests**: 4 replica-side tests (RDB + live-stream convergence, read-only
+  rejection, `REPLICAOF NO ONE` promotion, `ROLE`/`INFO` slave) with two in-process
+  instances; plus a manual cross-compat run where **our server replicated from a
+  real Redis 7.4 master** (diskless RDB loaded, live stream incl. `EXPIRE` applied,
+  DBSIZE converged).
 
 ### Phase 6A — Replication (master side)
 - **`ReplicationManager`** (engine, command-thread-confined): replid (from run id),

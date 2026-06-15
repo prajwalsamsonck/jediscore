@@ -111,6 +111,14 @@ public final class CommandDispatcher {
                     + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context");
         }
 
+        // Read-only replica: reject client writes (the master-link applying the
+        // replication stream is exempt).
+        if (server.replication().isReplica()
+                && !conn.isMasterLink()
+                && WriteCommands.isWrite(upperName)) {
+            return RespValue.error("READONLY You can't write against a read only replica.");
+        }
+
         // maxmemory: free memory before a data-adding command; refuse if we can't.
         if (server.config().maxMemory() > 0 && Eviction.isDenyOom(upperName)) {
             if (!Eviction.evictToFit(server)) {

@@ -107,6 +107,14 @@ public final class ReplicationCommands {
 
     private static RespValue role(CommandContext ctx) {
         ReplicationManager replication = ctx.server().replication();
+        if (replication.isReplica()) {
+            return new RespValue.Array(List.of(
+                    RespValue.bulk("slave"),
+                    RespValue.bulk(replication.masterHost() == null ? "" : replication.masterHost()),
+                    RespValue.integer(replication.masterPort()),
+                    RespValue.bulk(replicaState(replication.linkStatus())),
+                    RespValue.integer(replication.replicaOffset())));
+        }
         List<RespValue> slaves = new ArrayList<>();
         for (ReplicationManager.Replica replica : replication.replicas()) {
             slaves.add(new RespValue.Array(List.of(
@@ -139,10 +147,29 @@ public final class ReplicationCommands {
         return new RespValue.BulkString(sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
+    /** Maps the link status to the ROLE state token Redis uses. */
+    private static String replicaState(String linkStatus) {
+        return switch (linkStatus) {
+            case "connected" -> "connected";
+            case "sync" -> "sync";
+            default -> "connect";
+        };
+    }
+
     private static void appendReplication(CommandContext ctx, StringBuilder sb) {
         ReplicationManager r = ctx.server().replication();
         sb.append("# Replication\r\n");
-        sb.append("role:master\r\n");
+        if (r.isReplica()) {
+            sb.append("role:slave\r\n");
+            sb.append("master_host:").append(r.masterHost() == null ? "" : r.masterHost()).append("\r\n");
+            sb.append("master_port:").append(r.masterPort()).append("\r\n");
+            sb.append("master_link_status:").append("connected".equals(r.linkStatus()) ? "up" : "down").append("\r\n");
+            sb.append("master_sync_in_progress:").append("sync".equals(r.linkStatus()) ? 1 : 0).append("\r\n");
+            sb.append("slave_read_only:1\r\n");
+            sb.append("slave_repl_offset:").append(r.replicaOffset()).append("\r\n");
+        } else {
+            sb.append("role:master\r\n");
+        }
         sb.append("connected_slaves:").append(r.replicaCount()).append("\r\n");
         int i = 0;
         for (ReplicationManager.Replica replica : r.replicas()) {
@@ -170,11 +197,25 @@ public final class ReplicationCommands {
     private static RespValue replicaof(CommandContext ctx) {
         String host = ctx.argText(1);
         String port = ctx.argText(2);
+        ServerContext server = ctx.server();
         if (host.equalsIgnoreCase("no") && port.equalsIgnoreCase("one")) {
-            return RespValue.OK; // already a master; nothing to detach yet
+            server.replication().becomeMaster();
+            if (server.masterLink() != null) {
+                server.masterLink().disconnect();
+            }
+            return RespValue.OK;
         }
-        // Becoming a replica of another master is implemented in Phase 6B.
-        throw new CommandException(
-                "ERR REPLICAOF <host> <port> is not yet supported (replica mode arrives in Phase 6B)");
+        int p;
+        try {
+            p = (int) Keyspaces.parseLong(port);
+        } catch (CommandException e) {
+            throw new CommandException("ERR Invalid master port");
+        }
+        if (server.masterLink() == null) {
+            throw new CommandException("ERR replica mode is not available on this server");
+        }
+        server.replication().becomeReplica(host, p);
+        server.masterLink().connect(host, p);
+        return RespValue.OK;
     }
 }

@@ -10,6 +10,7 @@ import dev.jediscore.engine.ServerContext;
 import dev.jediscore.engine.ServerCron;
 import dev.jediscore.network.RespServer;
 import dev.jediscore.persistence.RdbPersistence;
+import dev.jediscore.replication.ReplicaLink;
 
 /**
  * The composition root: wires the engine, commands, and network layer into a
@@ -75,6 +76,9 @@ public final class JediCore implements AutoCloseable {
         context.setPersistence(persistence);
         persistence.loadOnStartup();
 
+        // Wire the replica-side link so REPLICAOF can replicate from a master.
+        context.setMasterLink(new ReplicaLink(context));
+
         RespServer server = new RespServer(context);
         int boundPort = server.start();
 
@@ -109,6 +113,9 @@ public final class JediCore implements AutoCloseable {
     @Override
     public void close() {
         cron.close();
+        if (context.masterLink() != null) {
+            context.masterLink().disconnect();
+        }
         server.close();
         persistence.shutdown();
         context.blocking().shutdown();

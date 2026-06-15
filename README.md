@@ -8,15 +8,14 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 6A complete — **master-side replication**: the `PSYNC`
-> full-resync handshake (stream the RDB, then the live command stream), a
-> replication backlog + offset, `REPLCONF`/ACK, deterministic command rewriting
-> (`EXPIRE`→`PEXPIREAT`, `SPOP`→`SREM`), `WAIT`, and `INFO replication`/`ROLE` —
-> **a real `redis-server` replicates from our master** and converges exactly. On
-> top of Phase 5 **advanced semantics** (Lua scripting, blocking commands,
-> transactions, Pub/Sub), **AOF + RDB persistence**, all five data types, `SCAN`,
-> expiration, memory accounting, and eviction. Next: the replica side (REPLICAOF),
-> then partial resync + Sentinel.
+> **Status:** Phase 6B complete — **replication both directions**, verified against
+> real Redis 7.4: a real `redis-server` replicates from our master, **and** our
+> server replicates from a real master (`REPLICAOF`, full resync incl. diskless
+> `$EOF:` RDB, live stream, read-only mode, `INFO`/`ROLE`). On top of master-side
+> replication (PSYNC, backlog, deterministic rewriting, `WAIT`), Phase 5 **advanced
+> semantics** (Lua, blocking, transactions, Pub/Sub), **AOF + RDB persistence**, all
+> five data types, `SCAN`, expiration, memory accounting, and eviction. Next:
+> partial resync + Sentinel (6C).
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text

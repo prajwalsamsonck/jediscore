@@ -74,6 +74,9 @@ public final class ClientConnection {
     /** The replica's announced listening port (from {@code REPLCONF listening-port}), or 0. */
     private int replicaListeningPort;
 
+    /** Whether this is the synthetic connection applying the master's replication stream. */
+    private boolean masterLink;
+
     /**
      * Creates a connection record.
      *
@@ -317,6 +320,16 @@ public final class ClientConnection {
     /** @return the replica's announced listening port, or 0 if not announced */
     public int replicaListeningPort() {
         return replicaListeningPort;
+    }
+
+    /** Marks this as the master-link connection that applies the replication stream (bypasses read-only). */
+    public void markMasterLink() {
+        this.masterLink = true;
+    }
+
+    /** @return whether this connection applies the master's replication stream */
+    public boolean isMasterLink() {
+        return masterLink;
     }
 
     /** @return whether the connection holds any subscription (channel, pattern, or shard) */

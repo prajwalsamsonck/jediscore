@@ -78,6 +78,15 @@ public interface Persistence {
      */
     byte[] dumpRdb();
 
+    /**
+     * Replaces the keyspace with a master's RDB image during a replication full
+     * resync: flushes every database, then loads the bytes. Runs on the command
+     * thread.
+     *
+     * @param rdb the RDB image received from the master
+     */
+    void loadReplicaRdb(byte[] rdb);
+
     /** Stops background workers and flushes/closes the AOF. */
     void shutdown();
 }
