@@ -73,6 +73,11 @@ public final class BlockingManager {
         return !active.isEmpty();
     }
 
+    /** @return the number of currently blocked clients (for {@code INFO clients}) */
+    public int blockedCount() {
+        return active.size();
+    }
+
     /**
      * Blocks a connection on a set of keys until one is ready or the timeout fires.
      *

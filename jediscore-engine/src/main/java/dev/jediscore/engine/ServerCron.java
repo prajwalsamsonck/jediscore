@@ -42,7 +42,8 @@ public final class ServerCron implements AutoCloseable {
     private void tick() {
         // Hand the work to the command thread; never touch the keyspace here.
         context.executor().submit(() -> {
-            ActiveExpiry.run(context);
+            context.stats().recordExpired(ActiveExpiry.run(context)); // active-cycle expirations
+            context.stats().sampleOps();
             Persistence persistence = context.persistence();
             if (persistence != null) {
                 persistence.onCron(); // evaluate RDB save points

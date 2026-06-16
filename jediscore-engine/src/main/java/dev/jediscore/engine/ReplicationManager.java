@@ -71,6 +71,8 @@ public final class ReplicationManager {
     private volatile String masterReplIdSeen;
     private volatile long fullSyncCount;
     private volatile long partialSyncCount;
+    private long syncFullServed;     // master side, command thread
+    private long syncPartialServed;
 
     /**
      * Creates a manager with a fresh replication ID derived from the run id.
@@ -340,6 +342,26 @@ public final class ReplicationManager {
     /** @return how many partial resyncs this replica has performed */
     public long partialSyncCount() {
         return partialSyncCount;
+    }
+
+    /** Records a full resync served to a replica (master side). */
+    public void recordFullResyncServed() {
+        syncFullServed++;
+    }
+
+    /** Records a partial resync served to a replica (master side). */
+    public void recordPartialResyncServed() {
+        syncPartialServed++;
+    }
+
+    /** @return full resyncs served to replicas (for {@code INFO stats sync_full}) */
+    public long syncFullServed() {
+        return syncFullServed;
+    }
+
+    /** @return partial resyncs served to replicas (for {@code INFO stats sync_partial_ok}) */
+    public long syncPartialServed() {
+        return syncPartialServed;
     }
 
     /** Encodes a command as a RESP multibulk frame. */

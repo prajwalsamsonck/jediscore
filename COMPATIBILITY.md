@@ -40,6 +40,7 @@ document, updated every phase as commands are implemented.
 | `CLIENT INFO` | 🚧 Partial | Representative field subset (no buffer/memory counters yet). |
 | `CLIENT SETINFO` | ✅ Done | Accepts `lib-name`/`lib-ver` advertisements. |
 | `COMMAND` | 🚧 Partial | Full table, `COUNT`, `LIST`, `INFO`; `DOCS` returns an empty (valid) map; key specs reported as 0. |
+| `INFO` | ✅ Done | All sections (Server/Clients/Memory/Persistence/Stats/Replication/CPU/Cluster/Keyspace) with live counters from `ServerStats`; section filter supported. `total_net_*_bytes` are 0 (not yet tracked); `used_memory_rss` is the JVM heap-in-use proxy; CPU is total process time attributed to user. |
 
 ### Generic key commands
 

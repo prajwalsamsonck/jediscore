@@ -33,6 +33,7 @@ public final class Database {
     private final Dict<Long> expires = new Dict<>();
     private long memoryUsed;
     private KeyspaceListener listener = KeyspaceListener.NONE;
+    private ServerStats stats = new ServerStats();
 
     /**
      * Creates a database.
@@ -74,6 +75,15 @@ public final class Database {
     }
 
     /**
+     * Installs the shared statistics counters (wired once at startup).
+     *
+     * @param stats the server stats
+     */
+    public void setStats(ServerStats stats) {
+        this.stats = stats;
+    }
+
+    /**
      * Looks up a key, honouring expiration, and records an access for LRU/LFU.
      *
      * @param key the key
@@ -81,11 +91,15 @@ public final class Database {
      */
     public RedisValue lookup(Bytes key) {
         if (expireIfNeeded(key)) {
+            stats.recordKeyspaceMiss();
             return null;
         }
         RedisValue value = dict.get(key);
         if (value != null) {
             value.recordAccess(clock.getAsLong());
+            stats.recordKeyspaceHit();
+        } else {
+            stats.recordKeyspaceMiss();
         }
         return value;
     }
@@ -308,6 +322,7 @@ public final class Database {
         }
         if (when <= clock.getAsLong()) {
             remove(key);
+            stats.recordExpired(1); // lazy expiration
             return true;
         }
         return false;

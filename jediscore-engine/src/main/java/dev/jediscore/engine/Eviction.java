@@ -81,6 +81,7 @@ public final class Eviction {
                 return false; // no evictable key under this policy
             }
             ctx.database(victim.dbIndex).remove(victim.key);
+            ctx.stats().recordEviction();
         }
         return true;
     }

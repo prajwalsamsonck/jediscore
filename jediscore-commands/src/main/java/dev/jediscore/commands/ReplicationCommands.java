@@ -41,7 +41,6 @@ public final class ReplicationCommands {
         registry.register(CommandSpec.of("replconf", -1, ReplicationCommands::replconf));
         registry.register(CommandSpec.of("psync", -1, ReplicationCommands::psync));
         registry.register(CommandSpec.of("sync", 1, ReplicationCommands::psync));
-        registry.register(CommandSpec.of("info", -1, ReplicationCommands::info));
         registry.register(CommandSpec.of("role", 1, ReplicationCommands::role));
         registry.register(CommandSpec.of("replicaof", 3, ReplicationCommands::replicaof));
         registry.register(CommandSpec.of("slaveof", 3, ReplicationCommands::replicaof));
@@ -102,6 +101,7 @@ public final class ReplicationCommands {
                     conn.deliver(new RespValue.Raw(missing));
                 }
                 replication.attachReplica(conn, conn.replicaListeningPort());
+                replication.recordPartialResyncServed();
                 return null;
             }
         }
@@ -123,6 +123,7 @@ public final class ReplicationCommands {
         conn.deliver(new RespValue.Raw(preamble.toByteArray()));
         // Register as a replica so subsequent writes stream to it.
         replication.attachReplica(conn, conn.replicaListeningPort());
+        replication.recordFullResyncServed();
         return null; // all output already delivered out-of-band
     }
 
@@ -151,25 +152,6 @@ public final class ReplicationCommands {
                 new RespValue.Array(slaves)));
     }
 
-    // ---- INFO ----------------------------------------------------------------
-
-    private static RespValue info(CommandContext ctx) {
-        String section = ctx.argCount() > 1 ? ctx.argUpper(1) : "DEFAULT";
-        boolean all = section.equals("DEFAULT") || section.equals("ALL") || section.equals("EVERYTHING");
-        StringBuilder sb = new StringBuilder();
-        if (all || section.equals("SERVER")) {
-            sb.append("# Server\r\n");
-            sb.append("redis_version:").append(ctx.server().config().version()).append("\r\n");
-            sb.append("run_id:").append(ctx.server().config().runId()).append("\r\n");
-            sb.append("tcp_port:").append(ctx.server().config().port()).append("\r\n");
-            sb.append("\r\n");
-        }
-        if (all || section.equals("REPLICATION")) {
-            appendReplication(ctx, sb);
-        }
-        return new RespValue.BulkString(sb.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
     /** Maps the link status to the ROLE state token Redis uses. */
     private static String replicaState(String linkStatus) {
         return switch (linkStatus) {
@@ -179,43 +161,7 @@ public final class ReplicationCommands {
         };
     }
 
-    private static void appendReplication(CommandContext ctx, StringBuilder sb) {
-        ReplicationManager r = ctx.server().replication();
-        sb.append("# Replication\r\n");
-        if (r.isReplica()) {
-            sb.append("role:slave\r\n");
-            sb.append("master_host:").append(r.masterHost() == null ? "" : r.masterHost()).append("\r\n");
-            sb.append("master_port:").append(r.masterPort()).append("\r\n");
-            sb.append("master_link_status:").append("connected".equals(r.linkStatus()) ? "up" : "down").append("\r\n");
-            sb.append("master_sync_in_progress:").append("sync".equals(r.linkStatus()) ? 1 : 0).append("\r\n");
-            sb.append("slave_read_only:1\r\n");
-            sb.append("slave_repl_offset:").append(r.replicaOffset()).append("\r\n");
-        } else {
-            sb.append("role:master\r\n");
-        }
-        sb.append("connected_slaves:").append(r.replicaCount()).append("\r\n");
-        int i = 0;
-        for (ReplicationManager.Replica replica : r.replicas()) {
-            sb.append("slave").append(i++).append(':')
-                    .append("ip=").append(replica.connection().remoteAddress().split(":")[0])
-                    .append(",port=").append(replica.listeningPort())
-                    .append(",state=online")
-                    .append(",offset=").append(replica.ackOffset())
-                    .append(",lag=0\r\n");
-        }
-        sb.append("master_failover_state:no-failover\r\n");
-        sb.append("master_replid:").append(r.replId()).append("\r\n");
-        sb.append("master_replid2:0000000000000000000000000000000000000000\r\n");
-        sb.append("master_repl_offset:").append(r.masterReplOffset()).append("\r\n");
-        sb.append("second_repl_offset:-1\r\n");
-        sb.append("repl_backlog_active:").append(r.masterReplOffset() > 0 ? 1 : 0).append("\r\n");
-        sb.append("repl_backlog_size:1048576\r\n");
-        sb.append("repl_backlog_first_byte_offset:0\r\n");
-        sb.append("repl_backlog_histlen:").append(r.masterReplOffset()).append("\r\n");
-        sb.append("\r\n");
-    }
-
-    // ---- REPLICAOF / SLAVEOF (stub) -----------------------------------------
+    // ---- REPLICAOF / SLAVEOF -------------------------------------------------
 
     private static RespValue replicaof(CommandContext ctx) {
         String host = ctx.argText(1);

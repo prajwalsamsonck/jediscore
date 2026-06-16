@@ -65,6 +65,7 @@ public final class CommandDispatcher {
         if (ctx.argCount() == 0) {
             return null;
         }
+        server.stats().recordCommand();
         String upperName = ctx.argText(0).toUpperCase(Locale.ROOT);
         CommandSpec spec = server.registry().lookup(upperName);
         ClientConnection conn = ctx.connection();

@@ -251,6 +251,16 @@ public final class PubSubRegistry {
         return patterns.size();
     }
 
+    /** @return the number of channels with at least one subscriber */
+    public int channelCount() {
+        return channels.size();
+    }
+
+    /** @return the number of shard channels with at least one subscriber */
+    public int shardChannelCount() {
+        return shardChannels.size();
+    }
+
     // ---- lifecycle -----------------------------------------------------------
 
     /**

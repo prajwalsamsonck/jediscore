@@ -24,6 +24,7 @@ public final class ServerContext {
     private final WatchTable watchTable;
     private final BlockingManager blocking;
     private final ReplicationManager replication;
+    private final ServerStats stats = new ServerStats();
     private CommandDispatcher dispatcher;
     private MasterLink masterLink;
     private Persistence persistence;
@@ -53,6 +54,7 @@ public final class ServerContext {
         for (int i = 0; i < databases.length; i++) {
             databases[i] = new Database(i, System::currentTimeMillis);
             databases[i].setListener(casListener);
+            databases[i].setStats(stats);
         }
         this.blocking = new BlockingManager(this);
         this.replication = new ReplicationManager(config.runId());
@@ -162,6 +164,11 @@ public final class ServerContext {
     /** @return the blocking-command wait-queue manager (command-thread confined) */
     public BlockingManager blocking() {
         return blocking;
+    }
+
+    /** @return the live server statistics counters */
+    public ServerStats stats() {
+        return stats;
     }
 
     /** @return the master-side replication manager (command-thread confined) */

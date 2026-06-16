@@ -63,6 +63,7 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
         });
         ctx.channel().attr(ConnectionAttributes.CONNECTION).set(conn);
         server.register(conn);
+        server.stats().recordConnection();
         super.channelActive(ctx);
     }
 
