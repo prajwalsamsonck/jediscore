@@ -236,6 +236,28 @@ class JediCoreReplicationMasterTest {
     }
 
     @Test
+    void hincrbyfloatPropagatedAsHset() throws Exception {
+        try (RawReplica replica = new RawReplica(7001); RespTestClient c = client()) {
+            c.call("HINCRBYFLOAT", "h", "f", "3.14");
+            List<String> cmd = replica.readCommandSkippingSelect();
+            assertThat(cmd).containsExactly("HSET", "h", "f", "3.14");
+        }
+    }
+
+    @Test
+    void getexExpirePropagatedAsPexpireat() throws Exception {
+        try (RawReplica replica = new RawReplica(7001); RespTestClient c = client()) {
+            c.call("SET", "k", "v");
+            assertThat(replica.readCommandSkippingSelect()).containsExactly("SET", "k", "v");
+            c.call("GETEX", "k", "EX", "100");
+            List<String> cmd = replica.readCommand();
+            assertThat(cmd.get(0)).isEqualTo("PEXPIREAT");
+            assertThat(cmd.get(1)).isEqualTo("k");
+            assertThat(Long.parseLong(cmd.get(2))).isGreaterThan(System.currentTimeMillis() + 90_000);
+        }
+    }
+
+    @Test
     void waitCountsAcknowledgedReplicas() throws Exception {
         try (RawReplica replica = new RawReplica(7001); RespTestClient c = client()) {
             replica.ackSyncOffset(); // ack the offset at which we synced

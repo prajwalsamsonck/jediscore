@@ -2,8 +2,10 @@ package dev.jediscore.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.jediscore.engine.ReplicationManager;
 import dev.jediscore.engine.ServerConfig;
 import dev.jediscore.protocol.RespValue;
+import dev.jediscore.replication.ReplicaLink;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -115,6 +117,29 @@ class JediCoreReplicationReplicaTest {
             // Now a master again: writes are accepted, data retained.
             assertThat(r.call("SET", "local", "1")).isEqualTo(RespValue.OK);
             assertThat(str(r.call("GET", "k"))).isEqualTo("v"); // kept the synced data
+        }
+    }
+
+    @Test
+    void reconnectUsesPartialResyncNotFullResync() throws Exception {
+        try (RespTestClient m = masterClient(); RespTestClient r = replicaClient()) {
+            m.call("SET", "a", "1");
+            replicaOfMaster(r);
+            awaitValue(r, "a", "1"); // initial full resync
+
+            ReplicationManager rm = replica.context().replication();
+            assertThat(rm.fullSyncCount()).isEqualTo(1);
+            assertThat(rm.partialSyncCount()).isZero();
+
+            // Simulate a transient network drop (keeps the cached replid/offset).
+            ((ReplicaLink) replica.context().masterLink()).dropConnectionForTest();
+            // The master keeps writing during the gap; the backlog retains it.
+            m.call("SET", "b", "2");
+
+            // On reconnect the replica resumes from the backlog and converges on b.
+            awaitValue(r, "b", "2");
+            assertThat(rm.partialSyncCount()).isGreaterThanOrEqualTo(1);
+            assertThat(rm.fullSyncCount()).isEqualTo(1); // no second full resync
         }
     }
 

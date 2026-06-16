@@ -735,8 +735,11 @@ is its own subsystem and is deferred.
   requests `PSYNC <replid> <offset+1>` on reconnect, falling back to full resync
   otherwise.
 - **More deterministic rewrites**: `SET … EX/PX`→`SET … PXAT`, `SETEX`/`PSETEX`→
-  `SET … PXAT`, `INCRBYFLOAT`→`SET` (concrete result) — feeding both replicas and
-  the AOF.
+  `SET … PXAT`, `GETEX`→`PEXPIREAT`/`PERSIST`, `INCRBYFLOAT`→`SET`,
+  `HINCRBYFLOAT`→`HSET` (concrete result) — feeding both replicas and the AOF.
+- **Replica-side partial resync** is covered end-to-end: a test hook drops the link
+  transiently and asserts the replica reconnects with `+CONTINUE` (no second full
+  resync) and converges on writes made during the gap.
 - **Sentinel**: `SENTINEL`/`FAILOVER` stubbed with a clear error; the failover
   design is documented above. Manual failover via `REPLICAOF NO ONE` works.
 - **Tests**: backlog ring unit tests (slice/evict/wrap), master partial-resync +

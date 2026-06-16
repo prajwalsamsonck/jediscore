@@ -69,6 +69,8 @@ public final class ReplicationManager {
     private volatile String linkStatus = "connect";
     private volatile long replicaOffset;
     private volatile String masterReplIdSeen;
+    private volatile long fullSyncCount;
+    private volatile long partialSyncCount;
 
     /**
      * Creates a manager with a fresh replication ID derived from the run id.
@@ -318,6 +320,26 @@ public final class ReplicationManager {
      */
     public void setMasterReplIdSeen(String replId) {
         this.masterReplIdSeen = replId;
+    }
+
+    /** Records that the replica completed a full resync (RDB transfer). */
+    public void recordFullSync() {
+        fullSyncCount++;
+    }
+
+    /** Records that the replica completed a partial resync ({@code +CONTINUE}). */
+    public void recordPartialSync() {
+        partialSyncCount++;
+    }
+
+    /** @return how many full resyncs this replica has performed */
+    public long fullSyncCount() {
+        return fullSyncCount;
+    }
+
+    /** @return how many partial resyncs this replica has performed */
+    public long partialSyncCount() {
+        return partialSyncCount;
     }
 
     /** Encodes a command as a RESP multibulk frame. */

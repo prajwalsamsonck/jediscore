@@ -215,7 +215,7 @@ document, updated every phase as commands are implemented.
 | `REPLICAOF`/`SLAVEOF` | ✅ Done | `host port` connects out, syncs (full or partial), and applies the stream; `NO ONE` promotes back to master (dataset retained). |
 | Replica read-only mode | ✅ Done | Client writes rejected with `READONLY`; the master-link applying the stream is exempt. Reads served normally. |
 | Command propagation | ✅ Done | Shared stream with `SELECT` on db change; offset + backlog advance once a replica has attached. |
-| Deterministic rewriting | ✅ Done | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL`, `SET … EX/PX`→`SET … PXAT`, `SETEX`/`PSETEX`→`SET … PXAT`, `INCRBYFLOAT`→`SET`. The same rewrite feeds the AOF (so AOF replay is deterministic too). |
+| Deterministic rewriting | ✅ Done | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL`, `SET … EX/PX`→`SET … PXAT`, `SETEX`/`PSETEX`→`SET … PXAT`, `GETEX`→`PEXPIREAT`/`PERSIST`, `INCRBYFLOAT`→`SET`, `HINCRBYFLOAT`→`HSET`. The same rewrites feed the AOF (so AOF replay is deterministic too). |
 | `SENTINEL` / `FAILOVER` | 📋 Design only | Not implemented; the failover design is documented in ARCHITECTURE.md. Manual failover: `REPLICAOF NO ONE` on the promoted replica, `REPLICAOF <new master>` on the rest. |
 | `WAIT` | ✅ Done | Counts replicas acked at the target offset; sends `GETACK` and blocks on the wait-queue until enough ack or timeout. |
 | `INFO replication` | ✅ Done | Master: `role:master`, `connected_slaves`, `slaveN:…`. Replica: `role:slave`, `master_host`/`port`, `master_link_status`, `slave_repl_offset`. |

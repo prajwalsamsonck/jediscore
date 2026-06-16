@@ -83,6 +83,22 @@ public final class ReplicaLink implements MasterLink {
         thread = null;
     }
 
+    /**
+     * Test hook: drops the current connection without retiring the link, so the
+     * loop reconnects and (with the cached replid/offset intact) attempts a partial
+     * resync — exercising a transient network drop.
+     */
+    public void dropConnectionForTest() {
+        Socket s = socket;
+        if (s != null) {
+            try {
+                s.close();
+            } catch (IOException ignored) {
+                // closing to force a reconnect
+            }
+        }
+    }
+
     // ---- the link loop -------------------------------------------------------
 
     private void runLoop(String host, int port, long myEpoch) {
@@ -102,11 +118,13 @@ public final class ReplicaLink implements MasterLink {
                     server.replication().setLinkStatus("sync");
                     byte[] rdb = readRdb(in);
                     loadRdb(rdb);
+                    server.replication().recordFullSync();
                     log.info("Replica link to {}:{} full-synced at offset {}", host, port, appliedOffset);
                 } else {
                     if (sync.replId() != null) {
                         cachedReplId = sync.replId();
                     }
+                    server.replication().recordPartialSync();
                     log.info("Replica link to {}:{} partial-resynced from offset {}", host, port, appliedOffset);
                 }
                 server.replication().setReplicaOffset(appliedOffset);

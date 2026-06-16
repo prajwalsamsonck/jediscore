@@ -207,10 +207,19 @@ public final class StringCommands {
                 default -> throw CommandException.syntax();
             }
         }
+        // GETEX only changes the TTL; propagate that change deterministically (the
+        // read itself is not replicated). With no option it is a pure read.
         if (persist) {
-            db.persist(key);
+            if (db.persist(key)) {
+                ctx.propagate(new byte[][]{bytes("PERSIST"), key.array()});
+            } else {
+                ctx.suppressPropagation();
+            }
         } else if (hasExpire) {
             db.setExpireAt(key, expireAtMs);
+            ctx.propagate(new byte[][]{bytes("PEXPIREAT"), key.array(), bytes(Long.toString(expireAtMs))});
+        } else {
+            ctx.suppressPropagation();
         }
         return RespValue.bulk(v.get());
     }

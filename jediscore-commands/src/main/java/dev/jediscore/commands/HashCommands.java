@@ -225,7 +225,12 @@ public final class HashCommands {
             db.put(key, hash);
         }
         String formatted = Keyspaces.formatDouble(result);
-        hash.put(field, formatted.getBytes(StandardCharsets.US_ASCII));
+        byte[] formattedBytes = formatted.getBytes(StandardCharsets.US_ASCII);
+        hash.put(field, formattedBytes);
+        // Float formatting is not bit-for-bit portable; propagate the concrete
+        // result as HSET so replicas and the AOF store this master's exact value.
+        ctx.propagate(new byte[][]{
+                "HSET".getBytes(StandardCharsets.UTF_8), key.array(), field, formattedBytes});
         return RespValue.bulk(formatted);
     }
 
