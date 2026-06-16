@@ -36,6 +36,9 @@ public final class ActiveExpiry {
      * @return the total number of keys expired this cycle
      */
     public static int run(ServerContext context) {
+        if (!context.activeExpiryEnabled()) {
+            return 0; // DEBUG SET-ACTIVE-EXPIRE 0 (keys still expire lazily on access)
+        }
         int totalExpired = 0;
         for (int dbIndex = 0; dbIndex < context.databaseCount(); dbIndex++) {
             totalExpired += runForDatabase(context.database(dbIndex));

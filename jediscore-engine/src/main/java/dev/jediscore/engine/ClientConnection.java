@@ -74,6 +74,9 @@ public final class ClientConnection {
     /** The replica's announced listening port (from {@code REPLCONF listening-port}), or 0. */
     private int replicaListeningPort;
 
+    /** Whether this connection has issued {@code MONITOR} and receives the command feed. */
+    private boolean monitor;
+
     /** Whether this is the synthetic connection applying the master's replication stream. */
     private boolean masterLink;
 
@@ -332,6 +335,16 @@ public final class ClientConnection {
         return masterLink;
     }
 
+    /** Marks this connection as a {@code MONITOR}. */
+    public void markMonitor() {
+        this.monitor = true;
+    }
+
+    /** @return whether this connection is in {@code MONITOR} mode */
+    public boolean isMonitor() {
+        return monitor;
+    }
+
     /** @return whether the connection holds any subscription (channel, pattern, or shard) */
     public boolean inSubscribeMode() {
         return !channels.isEmpty() || !patterns.isEmpty() || !shardChannels.isEmpty();
@@ -371,5 +384,6 @@ public final class ClientConnection {
         this.casDirty = false;
         this.queuedCommands.clear();
         this.watchedKeys.clear();
+        this.monitor = false;
     }
 }

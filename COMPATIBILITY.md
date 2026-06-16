@@ -39,8 +39,12 @@ document, updated every phase as commands are implemented.
 | `CLIENT GETNAME` / `SETNAME` | ✅ Done | `SETNAME` rejects spaces/newlines/control chars. |
 | `CLIENT INFO` | 🚧 Partial | Representative field subset (no buffer/memory counters yet). |
 | `CLIENT SETINFO` | ✅ Done | Accepts `lib-name`/`lib-ver` advertisements. |
-| `COMMAND` | 🚧 Partial | Full table, `COUNT`, `LIST`, `INFO`; `DOCS` returns an empty (valid) map; key specs reported as 0. |
+| `COMMAND` | ✅ Done | `COUNT`/`LIST`/`INFO`/`DOCS`/`GETKEYS`. Key specs from a built-in table (default `1,1,1`; no-key and multi-key overrides; `EVAL`/`EVALSHA` via `numkeys`) — best-effort, not Redis's full flag-rich spec. `DOCS` returns a minimal map. |
 | `INFO` | ✅ Done | All sections (Server/Clients/Memory/Persistence/Stats/Replication/CPU/Cluster/Keyspace) with live counters from `ServerStats`; section filter supported. `total_net_*_bytes` are 0 (not yet tracked); `used_memory_rss` is the JVM heap-in-use proxy; CPU is total process time attributed to user. |
+| `SLOWLOG` | ✅ Done | `GET`/`LEN`/`RESET`/`HELP`. Bounded newest-first ring; per-command timing from the dispatcher; `slowlog-log-slower-than` (default 10ms) and `slowlog-max-len` (128) configurable. Args truncated to 32×128B like Redis. |
+| `LATENCY` | 🚧 Partial | `LATEST`/`HISTORY`/`RESET`/`DOCTOR` for the `command` event; off by default (`latency-monitor-threshold` 0). Other built-in event types (fork, expire-cycle, …) not tracked. |
+| `MONITOR` | ✅ Done | Streams every executed command in Redis's `<ts> [db addr] "CMD" "arg"…` format; `AUTH`/`HELLO`/`RESET` and the replication link are not echoed. |
+| `DEBUG` | 🚧 Partial | `RELOAD`, `SLEEP`, `OBJECT` (encoding/serializedlength), `SET-ACTIVE-EXPIRE` (real toggle), `JMAP`/`QUICKLIST-PACKED-THRESHOLD`/`STRINGMATCH-LEN` no-ops. |
 
 ### Generic key commands
 

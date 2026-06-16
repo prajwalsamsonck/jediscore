@@ -44,6 +44,9 @@ public final class CommandDispatcher {
 
     private static final RespValue QUEUED = RespValue.simple("QUEUED");
 
+    /** Commands not echoed to MONITOR clients (avoid leaking credentials). */
+    private static final Set<String> MONITOR_HIDDEN = Set.of("AUTH", "HELLO", "RESET");
+
     private final ServerContext server;
 
     /**
@@ -127,9 +130,18 @@ public final class CommandDispatcher {
             }
         }
 
+        // Feed MONITOR clients before executing (as Redis does), excluding the
+        // monitors' own commands, the replication link, and AUTH (avoid leaking it).
+        if (server.monitors().hasMonitors() && !conn.isMonitor() && !conn.isMasterLink()
+                && !MONITOR_HIDDEN.contains(upperName)) {
+            server.monitors().feed(conn.db(), conn.remoteAddress(), ctx.args());
+        }
+
         conn.setLastCommand(spec.name());
+        long startNanos = System.nanoTime();
+        RespValue reply;
         try {
-            RespValue reply = spec.handler().execute(ctx);
+            reply = spec.handler().execute(ctx);
             // After a successful write: count it toward RDB save points, invalidate
             // any WATCH on the touched keys, and feed the AOF. (Errors thrown above
             // never reach here, so failed writes are neither counted nor propagated.)
@@ -151,14 +163,17 @@ public final class CommandDispatcher {
                     server.blocking().signalKeys(conn.db(), ctx.args());
                 }
             }
-            return reply;
         } catch (CommandException e) {
             // A deliberate, client-facing error (WRONGTYPE, bad integer, syntax, …).
-            return RespValue.error(e.getMessage());
+            reply = RespValue.error(e.getMessage());
         } catch (RuntimeException e) {
             log.error("Unhandled error executing command '{}'", spec.name(), e);
-            return RespValue.error("ERR internal error");
+            reply = RespValue.error("ERR internal error");
         }
+        long durationMicros = (System.nanoTime() - startNanos) / 1000;
+        server.slowLog().maybeRecord(durationMicros, ctx);
+        server.latencyMonitor().maybeRecordCommand(durationMicros);
+        return reply;
     }
 
     /**

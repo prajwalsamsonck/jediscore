@@ -23,6 +23,7 @@ public final class ResetCommand implements Command {
         ctx.server().pubsub().removeAll(ctx.connection());
         ctx.server().watchTable().unwatchAll(ctx.connection());
         ctx.server().blocking().cancel(ctx.connection());
+        ctx.server().monitors().remove(ctx.connection());
         ctx.connection().reset(authedAfter);
         return RespValue.simple("RESET");
     }

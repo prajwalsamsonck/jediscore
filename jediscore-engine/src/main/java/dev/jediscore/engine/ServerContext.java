@@ -25,6 +25,10 @@ public final class ServerContext {
     private final BlockingManager blocking;
     private final ReplicationManager replication;
     private final ServerStats stats = new ServerStats();
+    private final SlowLog slowLog = new SlowLog();
+    private final LatencyMonitor latencyMonitor = new LatencyMonitor();
+    private final MonitorRegistry monitors = new MonitorRegistry();
+    private volatile boolean activeExpiryEnabled = true;
     private CommandDispatcher dispatcher;
     private MasterLink masterLink;
     private Persistence persistence;
@@ -169,6 +173,35 @@ public final class ServerContext {
     /** @return the live server statistics counters */
     public ServerStats stats() {
         return stats;
+    }
+
+    /** @return the slow-command log (command-thread confined) */
+    public SlowLog slowLog() {
+        return slowLog;
+    }
+
+    /** @return the latency monitor (command-thread confined) */
+    public LatencyMonitor latencyMonitor() {
+        return latencyMonitor;
+    }
+
+    /** @return the MONITOR-mode connection registry (command-thread confined) */
+    public MonitorRegistry monitors() {
+        return monitors;
+    }
+
+    /** @return whether active (background) key expiration is enabled */
+    public boolean activeExpiryEnabled() {
+        return activeExpiryEnabled;
+    }
+
+    /**
+     * Enables or disables active expiration ({@code DEBUG SET-ACTIVE-EXPIRE}).
+     *
+     * @param enabled the new state
+     */
+    public void setActiveExpiryEnabled(boolean enabled) {
+        this.activeExpiryEnabled = enabled;
     }
 
     /** @return the master-side replication manager (command-thread confined) */

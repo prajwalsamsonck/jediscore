@@ -8,9 +8,9 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 7 in progress — **7A: full `INFO` + live stats** (Server/Clients/
-> Memory/Persistence/Stats/Replication/CPU/Cluster/Keyspace sections backed by a
-> real `ServerStats` tracker; verified via real `redis-cli`). On top of **Phase 6**
+> **Status:** Phase 7 in progress — **7A** full `INFO` + live stats, **7B**
+> diagnostics (`SLOWLOG`, `LATENCY`, `MONITOR`, `COMMAND GETKEYS`/key-specs, real
+> `DEBUG SLEEP`/`OBJECT`/`SET-ACTIVE-EXPIRE`). On top of **Phase 6**
 > master/replica replication, both directions
 > verified against real Redis 7.4: full **and partial** resync (`PSYNC`
 > `FULLRESYNC`/`CONTINUE` with a backlog ring), deterministic command rewriting

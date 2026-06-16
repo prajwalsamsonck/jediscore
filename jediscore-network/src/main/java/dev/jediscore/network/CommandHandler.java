@@ -79,6 +79,7 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
                 server.watchTable().unwatchAll(conn);
                 server.blocking().cancel(conn);
                 server.replication().removeReplica(conn);
+                server.monitors().remove(conn);
             });
         }
         super.channelInactive(ctx);

@@ -748,7 +748,41 @@ documented inline: `used_memory_rss` is the JVM heap-in-use, CPU is the total
 process CPU time attributed to user, and `total_net_*_bytes` are not yet tracked.
 Verified parseable by real `redis-cli` (`INFO server`/`stats`/`keyspace`).
 
+## Diagnostics — SLOWLOG, LATENCY, MONITOR (Phase 7B)
+
+The dispatcher times every command (`System.nanoTime` around `execute`) and, in
+one place, feeds three command-thread-confined subsystems:
+
+- **`SlowLog`** — a bounded newest-first ring; records commands slower than
+  `slowlog-log-slower-than` (default 10 ms), truncating args to 32×128 bytes as
+  Redis does.
+- **`LatencyMonitor`** — per-event spike series + running max; records the
+  `command` event when it crosses `latency-monitor-threshold` (off by default).
+- **`MonitorRegistry`** — the `MONITOR`-mode connections; each command is echoed
+  *before* execution as an inline `<ts> [db addr] "CMD" "arg"…` line delivered via
+  the connection outbox (`AUTH`/`HELLO`/`RESET` and the replication link are
+  excluded, so credentials never leak to a monitor).
+
+`COMMAND` gained `GETKEYS` and real key positions from a small built-in spec table
+(default `(1,1,1)`, no-key and multi-key overrides, `EVAL`/`EVALSHA` resolved via
+`numkeys`). `DEBUG` gained `SLEEP` (blocks the command thread, as Redis blocks the
+server), `OBJECT` (reports `encoding`/`serializedlength` from the value), and a
+real `SET-ACTIVE-EXPIRE` toggle that gates the active-expiry cron.
+
 ## Changelog
+
+### Phase 7B — Diagnostics (SLOWLOG, LATENCY, MONITOR, COMMAND, DEBUG)
+- **`SlowLog`/`LatencyMonitor`/`MonitorRegistry`** (engine), fed by per-command
+  timing in the dispatcher; `MONITOR` echoes via the outbox, excluding
+  auth/handshake commands.
+- **`DiagnosticsCommands`**: `SLOWLOG GET/LEN/RESET/HELP`, `LATENCY LATEST/HISTORY/
+  RESET/DOCTOR`, `MONITOR`.
+- **`COMMAND`**: `GETKEYS` + non-zero key specs + minimal `DOCS`.
+- **`DEBUG`**: real `SLEEP`/`OBJECT`/`SET-ACTIVE-EXPIRE` (the latter gates
+  `ActiveExpiry`).
+- **Tests**: 6 integration tests (slowlog capture via `DEBUG SLEEP`, latency
+  tracking, MONITOR feed, COMMAND key specs/GETKEYS, DEBUG OBJECT, active-expiry
+  toggle).
 
 ### Phase 7A — INFO &amp; live stats
 - **`ServerStats`** (engine): command-thread `long`s + `AtomicLong` connection
