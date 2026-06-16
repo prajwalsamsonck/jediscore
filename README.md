@@ -8,14 +8,15 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 6B complete — **replication both directions**, verified against
-> real Redis 7.4: a real `redis-server` replicates from our master, **and** our
-> server replicates from a real master (`REPLICAOF`, full resync incl. diskless
-> `$EOF:` RDB, live stream, read-only mode, `INFO`/`ROLE`). On top of master-side
-> replication (PSYNC, backlog, deterministic rewriting, `WAIT`), Phase 5 **advanced
-> semantics** (Lua, blocking, transactions, Pub/Sub), **AOF + RDB persistence**, all
-> five data types, `SCAN`, expiration, memory accounting, and eviction. Next:
-> partial resync + Sentinel (6C).
+> **Status:** Phase 6 complete — **master/replica replication**, both directions
+> verified against real Redis 7.4: full **and partial** resync (`PSYNC`
+> `FULLRESYNC`/`CONTINUE` with a backlog ring), deterministic command rewriting
+> (`EXPIRE`→`PEXPIREAT`, `SPOP`→`SREM`, `SETEX`/`INCRBYFLOAT`→`SET …`), `WAIT`,
+> `REPLICAOF`, read-only replicas, diskless `$EOF:` RDB, and `INFO`/`ROLE`. Manual
+> failover via `REPLICAOF NO ONE` (Sentinel design documented). On top of Phase 5
+> **advanced semantics** (Lua, blocking, transactions, Pub/Sub), **AOF + RDB
+> persistence**, all five data types, `SCAN`, expiration, memory accounting, and
+> eviction. Next: streams / cluster.
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text

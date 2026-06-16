@@ -45,6 +45,8 @@ public final class ReplicationCommands {
         registry.register(CommandSpec.of("role", 1, ReplicationCommands::role));
         registry.register(CommandSpec.of("replicaof", 3, ReplicationCommands::replicaof));
         registry.register(CommandSpec.of("slaveof", 3, ReplicationCommands::replicaof));
+        registry.register(CommandSpec.of("sentinel", -1, ReplicationCommands::sentinel));
+        registry.register(CommandSpec.of("failover", -1, ReplicationCommands::failover));
     }
 
     // ---- REPLCONF ------------------------------------------------------------
@@ -79,26 +81,47 @@ public final class ReplicationCommands {
 
     private static RespValue psync(CommandContext ctx) {
         ServerContext server = ctx.server();
-        Persistence persistence = server.persistence();
-        if (persistence == null) {
-            throw new CommandException("ERR replication unavailable: no persistence backend");
-        }
         ReplicationManager replication = server.replication();
         ClientConnection conn = ctx.connection();
         boolean psync = "psync".equalsIgnoreCase(ctx.argText(0));
 
+        // Partial resync: PSYNC <replid> <offset>. The wire offset is the next byte
+        // the replica wants (1-based), so the boundary it already has is offset - 1.
+        if (psync && ctx.argCount() >= 3 && !"?".equals(ctx.argText(1))) {
+            long wireOffset;
+            try {
+                wireOffset = Long.parseLong(ctx.argText(2));
+            } catch (NumberFormatException e) {
+                wireOffset = -1;
+            }
+            long boundary = wireOffset - 1;
+            if (wireOffset > 0 && replication.canPartialResync(ctx.argText(1), boundary)) {
+                conn.deliver(RespValue.simple("CONTINUE " + replication.replId()));
+                byte[] missing = replication.backlogSince(boundary);
+                if (missing.length > 0) {
+                    conn.deliver(new RespValue.Raw(missing));
+                }
+                replication.attachReplica(conn, conn.replicaListeningPort());
+                return null;
+            }
+        }
+
+        // Full resync.
+        Persistence persistence = server.persistence();
+        if (persistence == null) {
+            throw new CommandException("ERR replication unavailable: no persistence backend");
+        }
         long offset = replication.masterReplOffset();
-        // 1) FULLRESYNC line (PSYNC only; legacy SYNC sends just the RDB).
         if (psync) {
             conn.deliver(RespValue.simple("FULLRESYNC " + replication.replId() + " " + offset));
         }
-        // 2) The RDB as a bulk header with no trailing CRLF, followed by the payload.
+        // The RDB as a bulk header with no trailing CRLF, followed by the payload.
         byte[] rdb = persistence.dumpRdb();
         ByteArrayOutputStream preamble = new ByteArrayOutputStream();
         preamble.writeBytes(("$" + rdb.length + "\r\n").getBytes(StandardCharsets.US_ASCII));
         preamble.writeBytes(rdb);
         conn.deliver(new RespValue.Raw(preamble.toByteArray()));
-        // 3) Register as a replica so subsequent writes stream to it.
+        // Register as a replica so subsequent writes stream to it.
         replication.attachReplica(conn, conn.replicaListeningPort());
         return null; // all output already delivered out-of-band
     }
@@ -217,5 +240,22 @@ public final class ReplicationCommands {
         server.replication().becomeReplica(host, p);
         server.masterLink().connect(host, p);
         return RespValue.OK;
+    }
+
+    // ---- Sentinel / failover (documented stretch — not implemented) ----------
+
+    private static RespValue sentinel(CommandContext ctx) {
+        // Automatic failover (Sentinel) is documented as a design in ARCHITECTURE.md
+        // but not implemented; manual failover is REPLICAOF NO ONE on the chosen
+        // replica plus REPLICAOF <new-master> on the others.
+        throw new CommandException(
+                "ERR Sentinel is not implemented; see the failover design in ARCHITECTURE.md. "
+                        + "Promote manually with REPLICAOF NO ONE.");
+    }
+
+    private static RespValue failover(CommandContext ctx) {
+        throw new CommandException(
+                "ERR FAILOVER (coordinated failover) is not implemented; "
+                        + "promote a replica manually with REPLICAOF NO ONE.");
     }
 }

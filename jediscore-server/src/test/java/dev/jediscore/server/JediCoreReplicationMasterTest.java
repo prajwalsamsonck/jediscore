@@ -49,11 +49,11 @@ class JediCoreReplicationMasterTest {
         private final InputStream in;
         private final OutputStream out;
         long syncOffset;
+        String replId;
+        boolean continued;
 
         RawReplica(int listeningPort) throws IOException {
-            socket = new Socket();
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 2000);
-            socket.setSoTimeout(4000);
+            socket = connectSocket();
             in = socket.getInputStream();
             out = socket.getOutputStream();
             send("REPLCONF", "listening-port", Integer.toString(listeningPort));
@@ -63,8 +63,29 @@ class JediCoreReplicationMasterTest {
             assertThat(full).startsWith("+FULLRESYNC ");
             String[] parts = full.substring(1).split(" ");
             assertThat(parts[1]).hasSize(40);
+            replId = parts[1];
             syncOffset = Long.parseLong(parts[2]);
             readRdb();
+        }
+
+        /** Connects and requests a partial resync ({@code PSYNC <replid> <wireOffset>}). */
+        RawReplica(int listeningPort, String partialReplId, long wireOffset) throws IOException {
+            socket = connectSocket();
+            in = socket.getInputStream();
+            out = socket.getOutputStream();
+            send("REPLCONF", "listening-port", Integer.toString(listeningPort));
+            assertThat(readLine()).isEqualTo("+OK");
+            send("PSYNC", partialReplId, Long.toString(wireOffset));
+            String reply = readLine();
+            continued = reply.startsWith("+CONTINUE");
+            // CONTINUE carries the (possibly new) replid; no RDB follows.
+        }
+
+        private Socket connectSocket() throws IOException {
+            Socket s = new Socket();
+            s.connect(new InetSocketAddress("127.0.0.1", server.port()), 2000);
+            s.setSoTimeout(4000);
+            return s;
         }
 
         void send(String... args) throws IOException {
@@ -168,6 +189,49 @@ class JediCoreReplicationMasterTest {
             assertThat(srem.get(0)).isEqualTo("SREM");
             assertThat(srem.get(1)).isEqualTo("s");
             assertThat(srem).hasSize(3); // SREM s <one-member>
+        }
+    }
+
+    @Test
+    void partialResyncContinuesFromTheBacklog() throws Exception {
+        String replId;
+        try (RawReplica first = new RawReplica(7001); RespTestClient c = client()) {
+            replId = first.replId;
+            // Generate some stream the backlog will retain.
+            c.call("SET", "k1", "v1");
+            c.call("SET", "k2", "v2");
+            first.readCommandSkippingSelect(); // drain so the master has streamed it
+        } // first replica disconnects
+
+        // A replica that had synced at offset 0 reconnects asking to continue.
+        try (RawReplica resumer = new RawReplica(7002, replId, 1)) { // wire offset 1 → boundary 0
+            assertThat(resumer.continued).isTrue(); // +CONTINUE, not a full resync
+            // It replays the retained backlog: SELECT 0, SET k1 v1, SET k2 v2.
+            List<String> replayed = resumer.readCommandSkippingSelect();
+            assertThat(replayed).containsExactly("SET", "k1", "v1");
+            assertThat(resumer.readCommand()).containsExactly("SET", "k2", "v2");
+        }
+    }
+
+    @Test
+    void unknownReplidForcesFullResync() throws Exception {
+        try (RawReplica r = new RawReplica(7003,
+                "0000000000000000000000000000000000000000", 1)) {
+            // Replid mismatch → the master must NOT partial-resync.
+            assertThat(r.continued).isFalse();
+        }
+    }
+
+    @Test
+    void setexPropagatedAsAbsoluteSet() throws Exception {
+        try (RawReplica replica = new RawReplica(7001); RespTestClient c = client()) {
+            c.call("SETEX", "k", "100", "v");
+            List<String> cmd = replica.readCommandSkippingSelect();
+            assertThat(cmd.get(0)).isEqualTo("SET");
+            assertThat(cmd.get(1)).isEqualTo("k");
+            assertThat(cmd.get(2)).isEqualTo("v");
+            assertThat(cmd.get(3)).isEqualTo("PXAT");
+            assertThat(Long.parseLong(cmd.get(4))).isGreaterThan(System.currentTimeMillis() + 90_000);
         }
     }
 

@@ -121,6 +121,29 @@ public final class ReplicationManager {
     }
 
     /**
+     * Tests whether a reconnecting replica can be served a partial resync: its
+     * cached replication id must match ours and its position must still be in the
+     * backlog window.
+     *
+     * @param requestedReplId the replid the replica cached from its last sync
+     * @param boundary        the byte offset the replica has already received
+     * @return {@code true} if a {@code +CONTINUE} can be served from {@code boundary}
+     */
+    public boolean canPartialResync(String requestedReplId, long boundary) {
+        return replId.equals(requestedReplId) && boundary >= 0 && backlog.canServe(boundary);
+    }
+
+    /**
+     * Returns the backlog bytes a partially-resyncing replica is missing.
+     *
+     * @param boundary the byte offset the replica has already received
+     * @return the bytes from {@code boundary} to the current offset
+     */
+    public byte[] backlogSince(long boundary) {
+        return backlog.since(boundary);
+    }
+
+    /**
      * Removes a replica (on disconnect).
      *
      * @param connection the replica connection

@@ -689,7 +689,60 @@ runs until a random 40-byte marker reappears, read byte-by-byte so the command
 stream that follows is never over-consumed. **Read-only mode** rejects client
 writes with `READONLY` while a replica; `INFO`/`ROLE` report the slave fields.
 
+## Replication — partial resync &amp; failover (Phase 6C)
+
+### Partial resync
+
+A briefly-disconnected replica should not have to re-transfer the whole dataset.
+On reconnect it sends `PSYNC <replid> <offset>` where the offset is the **next
+byte it wants** (Redis's 1-based convention: `received + 1`). The master serves a
+partial resync when the replid matches its own *and* the requested position is
+still within the `ReplicationBacklog` ring: it replies `+CONTINUE <replid>` and
+streams exactly the missed bytes (`backlog.since(boundary)`, `boundary = offset -
+1`), then attaches the replica at the current offset. If the replid differs (the
+master restarted, hence a fresh replid) or the offset has scrolled out of the ring,
+it falls back to a full resync. The replica caches its replid and offset across
+reconnects and adopts the replid `+CONTINUE` returns.
+
+The byte convention is the subtle part: the offset is a count of stream bytes, so
+the backlog is addressed by a *boundary* (bytes already delivered) and the wire
+offset is `boundary + 1`. Getting this exactly right is what lets a real replica
+partial-resync from us and us from a real master.
+
+### Failover (design — not implemented)
+
+Automatic failover (Redis Sentinel / Cluster) is **documented but not built**; the
+`SENTINEL`/`FAILOVER` commands return an honest error pointing here. **Manual
+failover works today**: `REPLICAOF NO ONE` on the chosen replica promotes it to
+master, then `REPLICAOF <new-master>` repoints the others.
+
+A minimal Sentinel would add: (1) a monitor that pings masters/replicas and flags a
+master subjectively down after a timeout; (2) a gossip round so a quorum of
+sentinels agree it is objectively down; (3) a leader election (e.g. Raft-style
+term + votes) among the sentinels; (4) the leader picking the most-caught-up
+replica (highest `slave_repl_offset`), issuing `REPLICAOF NO ONE` to it and
+`REPLICAOF <new>` to the rest, and updating clients via pub/sub
+(`+switch-master`). The pieces JediCore already has — `INFO replication`/`ROLE`
+for health and offsets, `REPLICAOF` for repointing, pub/sub for notifications —
+are the building blocks; the missing part is the multi-sentinel consensus, which
+is its own subsystem and is deferred.
+
 ## Changelog
+
+### Phase 6C — Partial resync, deterministic rewrites, Sentinel design
+- **Partial resync**: master serves `+CONTINUE` from the backlog when a replica's
+  replid matches and its offset is retained; the replica caches replid/offset and
+  requests `PSYNC <replid> <offset+1>` on reconnect, falling back to full resync
+  otherwise.
+- **More deterministic rewrites**: `SET … EX/PX`→`SET … PXAT`, `SETEX`/`PSETEX`→
+  `SET … PXAT`, `INCRBYFLOAT`→`SET` (concrete result) — feeding both replicas and
+  the AOF.
+- **Sentinel**: `SENTINEL`/`FAILOVER` stubbed with a clear error; the failover
+  design is documented above. Manual failover via `REPLICAOF NO ONE` works.
+- **Tests**: backlog ring unit tests (slice/evict/wrap), master partial-resync +
+  replid-mismatch-forces-full + `SETEX`-rewrite integration tests, and a
+  Testcontainers both-ways cross-compat IT (CI; skips locally — the manual
+  equivalents were run against real Redis 7.4).
 
 ### Phase 6B — Replication (replica side)
 - **`ReplicaLink`** (`jediscore-replication`, implements the engine's new

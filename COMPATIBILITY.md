@@ -209,13 +209,14 @@ document, updated every phase as commands are implemented.
 | Command / feature | Status | Notes |
 |---------|--------|-------|
 | `PSYNC` (full resync) | ✅ Done | Both directions verified against real Redis 7.4: a real `redis-server` replicates from us, and we replicate from a real master (incl. **diskless `$EOF:`** RDB transfer). |
-| `PSYNC` (partial resync) | 📋 Phase 6C | Backlog ring buffer is in place; `CONTINUE` is served in 6C (a reconnect currently does a full resync). |
+| `PSYNC` (partial resync) | ✅ Done | A reconnecting replica with a matching replid whose offset is still in the backlog gets `+CONTINUE` and the missed bytes; otherwise it falls back to a full resync. Both the master serving and the replica requesting it are implemented (offsets follow Redis's 1-based next-byte convention). |
 | Legacy `SYNC` | ✅ Done | Sends the RDB without the `FULLRESYNC` line. |
 | `REPLCONF` | ✅ Done | `listening-port`, `capa`, `ACK <offset>`, `GETACK`; lenient on unknown options. |
-| `REPLICAOF`/`SLAVEOF` | ✅ Done | `host port` connects out, syncs, and applies the stream; `NO ONE` promotes back to master (dataset retained). |
+| `REPLICAOF`/`SLAVEOF` | ✅ Done | `host port` connects out, syncs (full or partial), and applies the stream; `NO ONE` promotes back to master (dataset retained). |
 | Replica read-only mode | ✅ Done | Client writes rejected with `READONLY`; the master-link applying the stream is exempt. Reads served normally. |
 | Command propagation | ✅ Done | Shared stream with `SELECT` on db change; offset + backlog advance once a replica has attached. |
-| Deterministic rewriting | 🚧 Partial | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL` (verified converging on a real replica). `SETEX`/`SET EX`/`INCRBYFLOAT` etc. still propagate verbatim — expanded in 6C. The same rewrite also feeds the AOF. |
+| Deterministic rewriting | ✅ Done | `EXPIRE`-family→`PEXPIREAT`, `SPOP`→`SREM`/`DEL`, `SET … EX/PX`→`SET … PXAT`, `SETEX`/`PSETEX`→`SET … PXAT`, `INCRBYFLOAT`→`SET`. The same rewrite feeds the AOF (so AOF replay is deterministic too). |
+| `SENTINEL` / `FAILOVER` | 📋 Design only | Not implemented; the failover design is documented in ARCHITECTURE.md. Manual failover: `REPLICAOF NO ONE` on the promoted replica, `REPLICAOF <new master>` on the rest. |
 | `WAIT` | ✅ Done | Counts replicas acked at the target offset; sends `GETACK` and blocks on the wait-queue until enough ack or timeout. |
 | `INFO replication` | ✅ Done | Master: `role:master`, `connected_slaves`, `slaveN:…`. Replica: `role:slave`, `master_host`/`port`, `master_link_status`, `slave_repl_offset`. |
 | `ROLE` | ✅ Done | Master `["master", offset, [[ip,port,ack],…]]`; replica `["slave", host, port, state, offset]`. |

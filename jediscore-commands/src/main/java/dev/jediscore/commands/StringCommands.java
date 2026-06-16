@@ -116,6 +116,7 @@ public final class StringCommands {
         boolean exists = existing != null;
 
         if ((nx && exists) || (xx && !exists)) {
+            ctx.suppressPropagation(); // condition failed: nothing changed
             return get ? oldReply(old) : RespValue.NULL;
         }
 
@@ -128,7 +129,21 @@ public final class StringCommands {
         if (hasExpire) {
             db.setExpireAt(key, expireAtMs);
         }
+        // Propagate a normalized, deterministic SET: drop NX/XX/GET (conditions and
+        // reply modifiers, not state) and make any expiry absolute (PXAT).
+        if (hasExpire) {
+            ctx.propagate(new byte[][]{bytes("SET"), key.array(), value,
+                    bytes("PXAT"), bytes(Long.toString(expireAtMs))});
+        } else if (keepttl) {
+            ctx.propagate(new byte[][]{bytes("SET"), key.array(), value, bytes("KEEPTTL")});
+        } else {
+            ctx.propagate(new byte[][]{bytes("SET"), key.array(), value});
+        }
         return get ? oldReply(old) : RespValue.OK;
+    }
+
+    private static byte[] bytes(String s) {
+        return s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private static RespValue oldReply(StringValue old) {
@@ -267,7 +282,11 @@ public final class StringCommands {
             throw new CommandException("ERR increment would produce NaN or Infinity");
         }
         String formatted = Keyspaces.formatDouble(result);
-        db.putKeepTtl(key, new StringValue(formatted.getBytes(StandardCharsets.US_ASCII)));
+        byte[] formattedBytes = formatted.getBytes(StandardCharsets.US_ASCII);
+        db.putKeepTtl(key, new StringValue(formattedBytes));
+        // Propagate the concrete result as SET, since float formatting is not
+        // bit-for-bit portable (replicas must store the master's exact string).
+        ctx.propagate(new byte[][]{bytes("SET"), key.array(), formattedBytes, bytes("KEEPTTL")});
         return RespValue.bulk(formatted);
     }
 
@@ -402,7 +421,11 @@ public final class StringCommands {
         }
         Database db = ctx.database();
         db.put(key, new StringValue(ctx.arg(3)));
-        db.setExpireAt(key, System.currentTimeMillis() + (seconds ? ttl * 1000 : ttl));
+        long expireAtMs = System.currentTimeMillis() + (seconds ? ttl * 1000 : ttl);
+        db.setExpireAt(key, expireAtMs);
+        // Propagate as an absolute SET ... PXAT, like Redis.
+        ctx.propagate(new byte[][]{bytes("SET"), key.array(), ctx.arg(3),
+                bytes("PXAT"), bytes(Long.toString(expireAtMs))});
         return RespValue.OK;
     }
 

@@ -43,6 +43,10 @@ public final class ReplicaLink implements MasterLink {
     private volatile Thread thread;
     private volatile Socket socket;
 
+    // Cached across reconnects to the same master, to attempt a partial resync.
+    private volatile String cachedReplId;
+    private volatile long appliedOffset = -1; // -1 => never synced, request a full resync
+
     /**
      * Creates a link bound to the server context.
      *
@@ -55,6 +59,9 @@ public final class ReplicaLink implements MasterLink {
     @Override
     public synchronized void connect(String host, int port) {
         disconnect();
+        // New REPLICAOF target: forget any cached position so we full-resync.
+        cachedReplId = null;
+        appliedOffset = -1;
         long myEpoch = epoch.incrementAndGet();
         Thread t = new Thread(() -> runLoop(host, port, myEpoch), "jedicore-replica-link");
         t.setDaemon(true);
@@ -87,16 +94,26 @@ public final class ReplicaLink implements MasterLink {
                 OutputStream out = s.getOutputStream();
 
                 server.replication().setLinkStatus("connecting");
-                long offset = handshake(in, out);
-                server.replication().setLinkStatus("sync");
-                byte[] rdb = readRdb(in);
-                loadRdb(rdb);
-                server.replication().setReplicaOffset(offset);
+                Sync sync = handshake(in, out);
+                if (sync.full()) {
+                    cachedReplId = sync.replId();
+                    appliedOffset = sync.offset();
+                    server.replication().setMasterReplIdSeen(sync.replId());
+                    server.replication().setLinkStatus("sync");
+                    byte[] rdb = readRdb(in);
+                    loadRdb(rdb);
+                    log.info("Replica link to {}:{} full-synced at offset {}", host, port, appliedOffset);
+                } else {
+                    if (sync.replId() != null) {
+                        cachedReplId = sync.replId();
+                    }
+                    log.info("Replica link to {}:{} partial-resynced from offset {}", host, port, appliedOffset);
+                }
+                server.replication().setReplicaOffset(appliedOffset);
                 server.replication().setLinkStatus("connected");
-                sendAck(out, offset);
-                log.info("Replica link to {}:{} synced at offset {}", host, port, offset);
+                sendAck(out, appliedOffset);
 
-                streamLoop(in, out, offset, myEpoch);
+                streamLoop(in, out, appliedOffset, myEpoch);
             } catch (IOException e) {
                 if (epoch.get() == myEpoch) {
                     log.warn("Replica link to {}:{} lost: {}", host, port, e.getMessage());
@@ -115,22 +132,36 @@ public final class ReplicaLink implements MasterLink {
         }
     }
 
-    /** Performs PING / REPLCONF / PSYNC and returns the FULLRESYNC offset. */
-    private long handshake(InputStream in, OutputStream out) throws IOException {
+    /** The outcome of a PSYNC handshake. */
+    private record Sync(boolean full, String replId, long offset) { }
+
+    /** Performs PING / REPLCONF / PSYNC, requesting a partial resync when possible. */
+    private Sync handshake(InputStream in, OutputStream out) throws IOException {
         send(out, "PING");
         expectLineStart(readReplyLine(in), "+");
         send(out, "REPLCONF", "listening-port", Integer.toString(server.config().port()));
         expectLineStart(readReplyLine(in), "+");
         send(out, "REPLCONF", "capa", "eof", "capa", "psync2");
         expectLineStart(readReplyLine(in), "+");
-        send(out, "PSYNC", "?", "-1");
-        String full = readReplyLine(in); // +FULLRESYNC <replid> <offset>
-        if (!full.startsWith("+FULLRESYNC")) {
-            throw new IOException("expected FULLRESYNC, got: " + full);
+
+        // If we have a cached position, ask the master to continue from the next
+        // byte (offset + 1, Redis's 1-based convention); otherwise full resync.
+        if (cachedReplId != null && appliedOffset >= 0) {
+            send(out, "PSYNC", cachedReplId, Long.toString(appliedOffset + 1));
+        } else {
+            send(out, "PSYNC", "?", "-1");
         }
-        String[] parts = full.substring(1).split(" ");
-        server.replication().setMasterReplIdSeen(parts[1]);
-        return Long.parseLong(parts[2]);
+        String reply = readReplyLine(in);
+        if (reply.startsWith("+FULLRESYNC")) {
+            String[] parts = reply.substring(1).split(" ");
+            return new Sync(true, parts[1], Long.parseLong(parts[2]));
+        }
+        if (reply.startsWith("+CONTINUE")) {
+            String[] parts = reply.substring(1).split(" ");
+            String replId = parts.length > 1 ? parts[1] : null;
+            return new Sync(false, replId, appliedOffset);
+        }
+        throw new IOException("expected FULLRESYNC or CONTINUE, got: " + reply);
     }
 
     private byte[] readRdb(InputStream in) throws IOException {
@@ -211,6 +242,7 @@ public final class ReplicaLink implements MasterLink {
                 while (acc.isReadable() && acc.getByte(acc.readerIndex()) == '\n') {
                     acc.skipBytes(1);
                     offset++;
+                    appliedOffset = offset;
                     server.replication().setReplicaOffset(offset);
                 }
                 int before = acc.readerIndex();
@@ -224,6 +256,7 @@ public final class ReplicaLink implements MasterLink {
                     continue;
                 }
                 offset += acc.readerIndex() - before;
+                appliedOffset = offset;
                 server.replication().setReplicaOffset(offset);
                 acc.discardReadBytes();
                 applyOrAck(value, link, out, offset);
