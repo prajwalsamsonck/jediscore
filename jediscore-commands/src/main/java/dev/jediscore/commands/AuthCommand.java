@@ -19,14 +19,15 @@ public final class AuthCommand implements Command {
     @Override
     public RespValue execute(CommandContext ctx) {
         ServerContext server = ctx.server();
-        if (!server.requiresAuth()) {
-            return RespValue.error(
-                    "ERR Client sent AUTH, but no password is set. "
-                            + "Did you mean AUTH <username> <password>?");
-        }
         String user;
         String password;
         if (ctx.argCount() == 2) {
+            // AUTH <password> against the default user; an error if it is nopass.
+            if (!server.requiresAuth()) {
+                return RespValue.error(
+                        "ERR Client sent AUTH, but no password is set. "
+                                + "Did you mean AUTH <username> <password>?");
+            }
             user = "default";
             password = ctx.argText(1);
         } else if (ctx.argCount() == 3) {
@@ -43,23 +44,22 @@ public final class AuthCommand implements Command {
     }
 
     /**
-     * Validates credentials and, on success, marks the connection authenticated.
-     * Shared with {@code HELLO}'s {@code AUTH} option.
+     * Validates credentials against the ACL and, on success, marks the connection
+     * authenticated as that user. Shared with {@code HELLO}'s {@code AUTH} option.
      *
      * @param server     the server context
      * @param connection the connection to authenticate
-     * @param user       the username (only {@code default} is supported in Phase 1)
+     * @param user       the username
      * @param password   the supplied password
      * @return {@code true} if authentication succeeded
      */
     static boolean authenticate(ServerContext server, ClientConnection connection, String user, String password) {
-        if (!"default".equals(user)) {
+        var authenticated = server.acl().authenticate(user, password);
+        if (authenticated == null) {
             return false;
         }
-        boolean ok = server.config().requirepass().map(password::equals).orElse(false);
-        if (ok) {
-            connection.setAuthenticated(true);
-        }
-        return ok;
+        connection.setAuthenticated(true);
+        connection.setUser(authenticated.name());
+        return true;
     }
 }

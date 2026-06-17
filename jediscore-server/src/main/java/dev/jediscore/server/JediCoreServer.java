@@ -47,8 +47,10 @@ public final class JediCoreServer {
         log.info("  config_file  = {}", boot.configFile() == null ? "(none)" : boot.configFile());
         log.info("  dir          = {}  appendonly = {}", persistenceConfig.dir(), persistenceConfig.appendOnly());
 
-        JediCore jediCore = JediCore.start(config, persistenceConfig);
+        JediCore jediCore = JediCore.start(config, persistenceConfig, boot.renameCommands());
         jediCore.context().setStandalone(true);
+        jediCore.context().setMaxClients(boot.maxClients());
+        jediCore.context().setProtectedMode(boot.protectedMode());
         if (boot.configFile() != null) {
             jediCore.context().setConfigFile(boot.configFile());
         }

@@ -32,6 +32,7 @@ public final class ClientConnection {
     private volatile RespVersion protocol = RespVersion.RESP2;
     private volatile String name = "";
     private volatile boolean authenticated;
+    private volatile String user = "default";
 
     private boolean closeAfterReply;
     private String lastCommand = "";
@@ -107,6 +108,14 @@ public final class ClientConnection {
         return remoteAddress;
     }
 
+    /** @return whether the peer connected over the loopback interface */
+    public boolean isLoopback() {
+        return remoteAddress.startsWith("127.")
+                || remoteAddress.startsWith("::1")
+                || remoteAddress.startsWith("0:0:0:0:0:0:0:1")
+                || remoteAddress.startsWith("localhost");
+    }
+
     /** @return the local accept address as {@code ip:port} */
     public String localAddress() {
         return localAddress;
@@ -143,6 +152,20 @@ public final class ClientConnection {
      */
     public void setName(String name) {
         this.name = name;
+    }
+
+    /** @return the authenticated ACL username (defaults to {@code default}) */
+    public String user() {
+        return user;
+    }
+
+    /**
+     * Sets the authenticated ACL username (on successful {@code AUTH}).
+     *
+     * @param user the username
+     */
+    public void setUser(String user) {
+        this.user = user;
     }
 
     /** @return whether the connection has authenticated */
@@ -373,6 +396,7 @@ public final class ClientConnection {
     public void reset(boolean authenticatedAfterReset) {
         this.protocol = RespVersion.RESP2;
         this.name = "";
+        this.user = "default";
         this.authenticated = authenticatedAfterReset;
         this.closeAfterReply = false;
         this.db = 0;

@@ -10,9 +10,9 @@ benchmark discipline that runs in CI.
 
 > **Status:** Phase 7 in progress — **7A** full `INFO` + live stats, **7B**
 > diagnostics (`SLOWLOG`/`LATENCY`/`MONITOR`/`COMMAND GETKEYS`/`DEBUG`), **7C**
-> config & lifecycle (`CONFIG GET/SET/REWRITE/RESETSTAT`, redis.conf + CLI loading,
-> graceful shutdown persisting state). On top of **Phase 6** master/replica
-> replication, both directions
+> config & lifecycle (`CONFIG`, redis.conf + CLI, graceful shutdown), **7D**
+> security (ACL + AUTH, maxclients, protected-mode, rename-command). On top of
+> **Phase 6** master/replica replication, both directions
 > verified against real Redis 7.4: full **and partial** resync (`PSYNC`
 > `FULLRESYNC`/`CONTINUE` with a backlog ring), deterministic command rewriting
 > (`EXPIRE`→`PEXPIREAT`, `SPOP`→`SREM`, `SETEX`/`INCRBYFLOAT`→`SET …`), `WAIT`,

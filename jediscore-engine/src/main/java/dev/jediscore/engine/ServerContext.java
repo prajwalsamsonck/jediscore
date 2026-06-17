@@ -31,7 +31,10 @@ public final class ServerContext {
     private final SlowLog slowLog = new SlowLog();
     private final LatencyMonitor latencyMonitor = new LatencyMonitor();
     private final MonitorRegistry monitors = new MonitorRegistry();
+    private final AclRegistry acl;
     private volatile boolean activeExpiryEnabled = true;
+    private volatile int maxClients = 10000;
+    private volatile boolean protectedMode = true;
     private CommandDispatcher dispatcher;
     private MasterLink masterLink;
     private Persistence persistence;
@@ -48,6 +51,7 @@ public final class ServerContext {
         this.config = config;
         this.registry = registry;
         this.executor = executor;
+        this.acl = new AclRegistry(config.requirepass().orElse(null));
         this.databases = new Database[config.databases()];
         this.watchTable = new WatchTable(config.databases());
         KeyspaceListener casListener = new KeyspaceListener() {
@@ -232,6 +236,39 @@ public final class ServerContext {
         return stats;
     }
 
+    /** @return the ACL user table (command-thread confined) */
+    public AclRegistry acl() {
+        return acl;
+    }
+
+    /** @return the maximum number of concurrent clients */
+    public int maxClients() {
+        return maxClients;
+    }
+
+    /**
+     * Sets the maximum number of concurrent clients.
+     *
+     * @param maxClients the limit
+     */
+    public void setMaxClients(int maxClients) {
+        this.maxClients = maxClients;
+    }
+
+    /** @return whether protected mode is enabled */
+    public boolean protectedMode() {
+        return protectedMode;
+    }
+
+    /**
+     * Enables or disables protected mode.
+     *
+     * @param protectedMode the new state
+     */
+    public void setProtectedMode(boolean protectedMode) {
+        this.protectedMode = protectedMode;
+    }
+
     /** @return the slow-command log (command-thread confined) */
     public SlowLog slowLog() {
         return slowLog;
@@ -332,9 +369,9 @@ public final class ServerContext {
         return executor;
     }
 
-    /** @return whether AUTH is required before other commands */
+    /** @return whether AUTH is required before other commands (the default user is not nopass) */
     public boolean requiresAuth() {
-        return config.requiresAuth();
+        return acl.authRequired();
     }
 
     /**

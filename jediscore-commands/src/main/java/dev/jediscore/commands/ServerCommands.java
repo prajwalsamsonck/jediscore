@@ -116,7 +116,7 @@ public final class ServerCommands {
         sb.append("# Clients\r\n");
         line(sb, "connected_clients", Integer.toString(ctx.server().connectionCount()));
         line(sb, "cluster_connections", "0");
-        line(sb, "maxclients", "10000");
+        line(sb, "maxclients", Integer.toString(ctx.server().maxClients()));
         line(sb, "blocked_clients", Integer.toString(ctx.server().blocking().blockedCount()));
         line(sb, "tracking_clients", "0");
         line(sb, "clients_in_timeout_table", "0");

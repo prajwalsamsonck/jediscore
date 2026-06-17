@@ -286,7 +286,8 @@ final class AofManager {
             }
             // Then incr files (type i) in manifest order.
             CommandDispatcher dispatcher = new CommandDispatcher(context);
-            ClientConnection replayConn = new ClientConnection(0, "aof", "aof", true);
+            // A loopback address so protected mode never blocks AOF replay.
+            ClientConnection replayConn = new ClientConnection(0, "127.0.0.1:0", "127.0.0.1:0", true);
             for (String[] e : entries) {
                 if (fieldType(e).equals("i")) {
                     replayIncr(aofDir.resolve(fieldName(e)), dispatcher, replayConn);

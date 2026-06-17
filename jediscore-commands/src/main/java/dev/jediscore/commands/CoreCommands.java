@@ -53,5 +53,6 @@ public final class CoreCommands {
         ServerCommands.registerAll(registry);
         DiagnosticsCommands.registerAll(registry);
         ConfigCommands.registerAll(registry);
+        AclCommands.registerAll(registry);
     }
 }

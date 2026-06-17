@@ -46,6 +46,14 @@ public final class CommandHandler extends SimpleChannelInboundHandler<RespReques
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        // Enforce maxclients before registering: reject and close once at capacity.
+        if (server.connectionCount() >= server.maxClients()) {
+            server.stats().recordRejectedConnection();
+            ctx.writeAndFlush(io.netty.buffer.Unpooled.copiedBuffer(
+                            "-ERR max number of clients reached\r\n", java.nio.charset.StandardCharsets.US_ASCII))
+                    .addListener(io.netty.channel.ChannelFutureListener.CLOSE);
+            return;
+        }
         long id = server.nextClientId();
         boolean authenticated = !server.requiresAuth();
         ClientConnection conn = new ClientConnection(

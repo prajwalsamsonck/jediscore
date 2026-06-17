@@ -132,9 +132,14 @@ public final class ConfigCommands {
         p.put("port", readOnly(c -> Integer.toString(c.config().port())));
         p.put("bind", readOnly(c -> c.config().host()));
         p.put("databases", readOnly(c -> Integer.toString(c.config().databases())));
-        p.put("maxclients", readOnly(c -> "10000"));
         p.put("appendonly", readOnly(c -> c.persistence() != null && c.persistence().appendOnlyEnabled() ? "yes" : "no"));
         p.put("dir", readOnly(c -> c.persistence() == null ? "" : c.persistence().dir()));
+
+        // Hardening (settable).
+        p.put("maxclients", param(c -> Integer.toString(c.maxClients()),
+                (c, v) -> c.setMaxClients((int) parseLong(v))));
+        p.put("protected-mode", param(c -> c.protectedMode() ? "yes" : "no",
+                (c, v) -> c.setProtectedMode("yes".equalsIgnoreCase(v))));
 
         // Memory / eviction (config-backed).
         p.put("maxmemory", param(c -> Long.toString(c.config().maxMemory()),
@@ -146,8 +151,12 @@ public final class ConfigCommands {
 
         // Auth.
         p.put("requirepass", param(c -> c.config().requirepass().orElse(""),
-                (c, v) -> c.setConfig(c.config().toBuilder()
-                        .requirepass(v.isEmpty() ? Optional.empty() : Optional.of(v)).build())));
+                (c, v) -> {
+                    c.setConfig(c.config().toBuilder()
+                            .requirepass(v.isEmpty() ? Optional.empty() : Optional.of(v)).build());
+                    // Keep the ACL default user in sync with requirepass.
+                    c.acl().defaultUser().setPlainPassword(v.isEmpty() ? null : v);
+                }));
 
         // Encoding thresholds (config-backed).
         p.put("hash-max-listpack-entries", param(c -> Integer.toString(c.config().hashMaxListpackEntries()),

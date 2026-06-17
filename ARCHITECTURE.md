@@ -794,7 +794,53 @@ exits — but only the standalone process; embedded/test instances persist and r
 itself is pure teardown (cron, replica link, Netty groups, persistence/AOF,
 blocking + timeout schedulers, command executor) so tests stay isolated.
 
+## Security (Phase 7D)
+
+### ACL &amp; authentication
+
+An `AclRegistry` holds the users (always a `default`). Each `AclUser` carries an
+enabled flag, SHA-256 password hashes (or `nopass`), key/channel patterns, and
+command permissions. `AUTH` validates against the registry and records the
+authenticated username on the connection; `requirepass` is just the `default`
+user's password (kept in sync by `CONFIG SET requirepass`). The dispatcher
+enforces command permissions per user: `canRun` resolves explicit `+cmd`/`-cmd`,
+then the `@all`/`@read`/`@write`/`@admin` categories (mapped via
+`WriteCommands.isWrite` + a small admin set). **Honest scope**: key/channel
+patterns are parsed, stored, and reported by `ACL GETUSER`/`LIST` but not yet
+enforced at the dispatcher; selectors are unsupported.
+
+### Hardening
+
+- **maxclients** — rejected at `channelActive` before registration (`-ERR max
+  number of clients reached`), counted as `rejected_connections`.
+- **protected-mode** (default on) — a non-loopback client cannot run commands when
+  no password is set. Internal connections are exempt: the master-link by its flag,
+  and AOF/EXEC replay because they run on loopback/system connections (the AOF
+  replay connection uses a loopback address precisely so protected mode never
+  blocks a restore).
+- **rename-command** — `CommandRegistry.rename(from, to)` renames (or, with an empty
+  target, disables) a command; applied from the config file/CLI before the table is
+  published.
+- **Input limits** — the parser caps multibulk at 1M elements and bulk strings at
+  512 MB (`proto-max-bulk-len`).
+
 ## Changelog
+
+### Phase 7D — Security (ACL, auth, hardening)
+- **`AclUser`/`AclRegistry`** (engine): users, SHA-256 passwords, command/category
+  permissions; `AUTH` rewired through the ACL; `requirepass` ⇄ default user.
+- **Dispatcher**: per-user command/category enforcement (`NOPERM`) and protected-mode
+  gating (`DENIED`).
+- **Hardening**: maxclients reject (`CommandHandler`), `rename-command`
+  (`CommandRegistry.rename` + `BootConfig`/`JediCore.start` overload), settable
+  `maxclients`/`protected-mode` in `CONFIG`.
+- **`AclCommands`**: `WHOAMI`/`LIST`/`USERS`/`CAT`/`GETUSER`/`SETUSER`/`DELUSER`/
+  `GENPASS`.
+- **Tests**: 8 security integration tests (ACL listing, SETUSER+AUTH user switch,
+  command and `@category` enforcement, DELUSER, requirepass gating, maxclients
+  reject, rename/disable).
+- **Deferred**: TLS (a self-contained Netty `SslContext` + pipeline handler) to the
+  next step.
 
 ### Phase 7C — Config &amp; lifecycle
 - **`ServerConfig.Builder`** + swappable `volatile` config on `ServerContext`;

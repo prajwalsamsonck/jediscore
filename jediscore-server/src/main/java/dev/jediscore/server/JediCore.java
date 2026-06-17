@@ -62,8 +62,24 @@ public final class JediCore implements AutoCloseable {
      */
     public static JediCore start(ServerConfig config, PersistenceConfig persistenceConfig)
             throws InterruptedException {
+        return start(config, persistenceConfig, java.util.Map.of());
+    }
+
+    /**
+     * Builds and starts a server, additionally applying {@code rename-command}
+     * directives before the command table is published.
+     *
+     * @param config            the server configuration
+     * @param persistenceConfig the persistence configuration
+     * @param renameCommands    {@code from → to} renames (empty {@code to} disables)
+     * @return a running server handle
+     * @throws InterruptedException if interrupted while binding the socket
+     */
+    public static JediCore start(ServerConfig config, PersistenceConfig persistenceConfig,
+                                 java.util.Map<String, String> renameCommands) throws InterruptedException {
         CommandRegistry registry = new CommandRegistry();
         CoreCommands.registerAll(registry);
+        renameCommands.forEach(registry::rename);
 
         // The command loop is created (and thus its thread started) only after
         // the registry is fully populated, establishing safe publication of the

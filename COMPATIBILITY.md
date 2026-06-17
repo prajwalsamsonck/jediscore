@@ -32,7 +32,13 @@ document, updated every phase as commands are implemented.
 | `PING` | ✅ Done | `+PONG`, or echoes one argument; arity-checks >2 args. |
 | `ECHO` | ✅ Done | |
 | `HELLO` | ✅ Done | Protocol negotiation (2/3), `AUTH`/`SETNAME` options, `NOPROTO` on bad version. |
-| `AUTH` | 🚧 Partial | Single `requirepass` against the implicit `default` user; full ACLs deferred. |
+| `AUTH` | ✅ Done | `AUTH password` (default user) and `AUTH username password`; validates against the ACL (SHA-256 password hashes). |
+| `ACL` | 🚧 Partial | `WHOAMI`/`LIST`/`USERS`/`CAT`/`GETUSER`/`SETUSER`/`DELUSER`/`GENPASS`. Command rules and the `@read`/`@write`/`@admin`/`@all` categories are **enforced**; key/channel patterns are parsed, stored, and reported but **not yet enforced**; ACL selectors are not supported. |
+| `maxclients` | ✅ Done | New connections beyond the limit are rejected at accept with `-ERR max number of clients reached`; settable via `CONFIG`. |
+| `protected-mode` | ✅ Done | On by default: a non-loopback client cannot run commands when no password is set (`DENIED …`). Internal replay/master-link connections are exempt. |
+| `rename-command` | ✅ Done | Rename or disable (rename to `""`) commands via the config file / CLI. |
+| Input size limits | ✅ Done | Multibulk capped at 1M elements; bulk strings at 512 MB (`proto-max-bulk-len`), enforced in the parser. |
+| TLS | 📋 Phase 7D-cont | Not yet implemented. |
 | `QUIT` | ✅ Done | Replies `+OK`, then closes after flush. |
 | `RESET` | ✅ Done | Resets protocol/name/auth and drops all pub/sub subscriptions; transaction state reset when that lands. |
 | `CLIENT ID` | ✅ Done | |

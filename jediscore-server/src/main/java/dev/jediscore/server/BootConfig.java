@@ -21,11 +21,15 @@ import java.util.Optional;
  * {@code --option value} flags, the way {@code redis-server [config] [--opt …]}
  * works. CLI options override file directives.
  *
- * @param server      the resulting server configuration
- * @param persistence the resulting persistence configuration
- * @param configFile  the loaded config-file path, or {@code null} if none
+ * @param server         the resulting server configuration
+ * @param persistence    the resulting persistence configuration
+ * @param configFile     the loaded config-file path, or {@code null} if none
+ * @param maxClients     the maximum concurrent clients
+ * @param protectedMode  whether protected mode is enabled
+ * @param renameCommands {@code rename-command} directives ({@code from → to}, empty = disable)
  */
-public record BootConfig(ServerConfig server, PersistenceConfig persistence, String configFile) {
+public record BootConfig(ServerConfig server, PersistenceConfig persistence, String configFile,
+                         int maxClients, boolean protectedMode, Map<String, String> renameCommands) {
 
     /**
      * Loads configuration from the command-line arguments.
@@ -35,12 +39,13 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
      */
     public static BootConfig load(String[] args) {
         Map<String, List<String>> params = new LinkedHashMap<>();
+        Map<String, String> renames = new LinkedHashMap<>();
         String configFile = null;
         String address = null;
         int i = 0;
         if (args.length > 0 && !args[0].startsWith("--") && isConfigFile(args[0])) {
             configFile = args[0];
-            parseFile(configFile, params);
+            parseFile(configFile, params, renames);
             i = 1;
         }
         for (; i < args.length; ) {
@@ -53,13 +58,17 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
                     values.add(args[i]);
                     i++;
                 }
-                params.put(key, values);
+                if (key.equals("rename-command") && values.size() == 2) {
+                    renames.put(values.get(0).toUpperCase(Locale.ROOT), values.get(1));
+                } else {
+                    params.put(key, values);
+                }
             } else {
                 address = a; // host:port positional
                 i++;
             }
         }
-        return build(params, address, configFile);
+        return build(params, address, configFile, renames);
     }
 
     private static boolean isConfigFile(String arg) {
@@ -76,7 +85,7 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
         }
     }
 
-    private static void parseFile(String path, Map<String, List<String>> params) {
+    private static void parseFile(String path, Map<String, List<String>> params, Map<String, String> renames) {
         try {
             for (String raw : Files.readAllLines(Path.of(path))) {
                 String line = raw.trim();
@@ -88,7 +97,12 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
                     continue;
                 }
                 String key = tokens.get(0).toLowerCase(Locale.ROOT);
-                params.put(key, tokens.subList(1, tokens.size()));
+                List<String> values = tokens.subList(1, tokens.size());
+                if (key.equals("rename-command") && values.size() == 2) {
+                    renames.put(values.get(0).toUpperCase(Locale.ROOT), values.get(1)); // accumulate
+                } else {
+                    params.put(key, values);
+                }
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read config file: " + path, e);
@@ -123,7 +137,8 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
         return out;
     }
 
-    private static BootConfig build(Map<String, List<String>> params, String address, String configFile) {
+    private static BootConfig build(Map<String, List<String>> params, String address, String configFile,
+                                    Map<String, String> renames) {
         String host = first(params, "bind", "127.0.0.1");
         int port = Integer.parseInt(first(params, "port", "6379"));
         if (address != null && !address.isBlank()) {
@@ -162,7 +177,9 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
         if ("yes".equalsIgnoreCase(first(params, "appendonly", "no"))) {
             pc = pc.withAppendOnly(first(params, "appendfsync", "everysec"));
         }
-        return new BootConfig(serverConfig, pc, configFile);
+        int maxClients = Integer.parseInt(first(params, "maxclients", "10000"));
+        boolean protectedMode = !"no".equalsIgnoreCase(first(params, "protected-mode", "yes"));
+        return new BootConfig(serverConfig, pc, configFile, maxClients, protectedMode, renames);
     }
 
     private static List<SavePoint> parseSavePoints(List<String> values) {

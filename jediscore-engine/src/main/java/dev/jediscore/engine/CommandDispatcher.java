@@ -89,6 +89,32 @@ public final class CommandDispatcher {
             return RespValue.error("NOAUTH Authentication required.");
         }
 
+        // Protected mode: a non-loopback client cannot run commands when no password
+        // is set, unless protected mode has been disabled. (AUTH/HELLO are allowed
+        // so a client can still negotiate; CONFIG is allowed to turn it off locally.)
+        if (server.protectedMode()
+                && !server.requiresAuth()
+                && !conn.isLoopback()
+                && !conn.isMasterLink()
+                && !NO_AUTH_COMMANDS.contains(upperName)
+                && !upperName.equals("CONFIG")) {
+            return RespValue.error("DENIED JediCore is running in protected mode because protected mode "
+                    + "is enabled and no password is set. Connect from the loopback interface, set a "
+                    + "password (requirepass), or disable protected mode (protected-mode no).");
+        }
+
+        // ACL: enforce the authenticated user's command permissions.
+        if (!NO_AUTH_COMMANDS.contains(upperName)) {
+            AclUser user = server.acl().user(conn.user());
+            if (user != null && !user.canRun(upperName)) {
+                if (queueing) {
+                    conn.markTransactionError();
+                }
+                return RespValue.error("NOPERM User " + conn.user()
+                        + " has no permissions to run the '" + spec.name() + "' command");
+            }
+        }
+
         // Inside MULTI: validate arity, then queue (or flag the transaction so EXEC
         // aborts). Control commands fall through to immediate execution.
         if (queueing) {

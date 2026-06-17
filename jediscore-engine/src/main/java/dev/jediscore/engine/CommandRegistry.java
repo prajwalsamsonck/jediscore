@@ -43,6 +43,22 @@ public final class CommandRegistry {
         return byName.get(name.toUpperCase(Locale.ROOT));
     }
 
+    /**
+     * Renames or disables a command (Redis's {@code rename-command}). Renaming to
+     * an empty string disables the command (it is removed from the table).
+     *
+     * @param from the existing command name
+     * @param to   the new name, or {@code ""} to disable
+     */
+    public void rename(String from, String to) {
+        CommandSpec spec = byName.remove(from.toUpperCase(Locale.ROOT));
+        if (spec == null || to.isEmpty()) {
+            return; // unknown command, or disabling it
+        }
+        byName.put(to.toUpperCase(Locale.ROOT),
+                new CommandSpec(to, spec.arity(), spec.flags(), spec.handler()));
+    }
+
     /** @return the number of registered commands */
     public int size() {
         return byName.size();
