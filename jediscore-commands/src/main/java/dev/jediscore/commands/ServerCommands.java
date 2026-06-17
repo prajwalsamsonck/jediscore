@@ -32,6 +32,32 @@ public final class ServerCommands {
      */
     public static void registerAll(CommandRegistry registry) {
         registry.register(CommandSpec.of("info", -1, ServerCommands::info));
+        registry.register(CommandSpec.of("shutdown", -1, ServerCommands::shutdown));
+    }
+
+    /**
+     * {@code SHUTDOWN [NOSAVE|SAVE]} — persists per the (possibly overridden) policy,
+     * then terminates the standalone server. Embedded/test instances never exit the
+     * JVM; they simply reply {@code +OK} after persisting.
+     */
+    private static RespValue shutdown(CommandContext ctx) {
+        if (ctx.argCount() > 1) {
+            String arg = ctx.argUpper(1);
+            if (arg.equals("NOSAVE")) {
+                ctx.server().setSaveOnShutdown(false);
+            } else if (arg.equals("SAVE")) {
+                ctx.server().setSaveOnShutdown(true);
+            } else {
+                throw new dev.jediscore.engine.CommandException("ERR syntax error");
+            }
+        }
+        if (ctx.server().saveOnShutdown() && ctx.server().persistence() != null) {
+            ctx.server().persistence().save();
+        }
+        if (ctx.server().isStandalone()) {
+            System.exit(0); // the shutdown hook then releases resources
+        }
+        return RespValue.OK; // embedded mode: persisted, but the JVM keeps running
     }
 
     private static RespValue info(CommandContext ctx) {

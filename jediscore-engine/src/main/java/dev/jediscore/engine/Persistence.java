@@ -50,6 +50,9 @@ public interface Persistence {
     /** @return whether AOF is enabled */
     boolean appendOnlyEnabled();
 
+    /** @return the working directory where RDB/AOF files are stored */
+    String dir();
+
     /**
      * Appends a write command to the AOF (no-op if AOF is disabled or during load).
      *

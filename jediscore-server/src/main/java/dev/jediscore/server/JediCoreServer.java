@@ -38,18 +38,34 @@ public final class JediCoreServer {
     public static void main(String[] args) throws InterruptedException {
         System.out.print(banner());
 
-        ServerConfig config = parseConfig(args);
-        PersistenceConfig persistenceConfig = parsePersistenceConfig(args);
+        BootConfig boot = BootConfig.load(args);
+        ServerConfig config = boot.server();
+        PersistenceConfig persistenceConfig = boot.persistence();
         log.info("JediCore {} starting (RESP2/RESP3, single command thread)", VERSION);
         log.info("  java.version = {}", System.getProperty("java.version"));
         log.info("  run_id       = {}", config.runId());
+        log.info("  config_file  = {}", boot.configFile() == null ? "(none)" : boot.configFile());
         log.info("  dir          = {}  appendonly = {}", persistenceConfig.dir(), persistenceConfig.appendOnly());
 
         JediCore jediCore = JediCore.start(config, persistenceConfig);
+        jediCore.context().setStandalone(true);
+        if (boot.configFile() != null) {
+            jediCore.context().setConfigFile(boot.configFile());
+        }
         log.info("Ready to accept connections tcp on {}:{}", config.host(), jediCore.port());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutdown signal received; stopping JediCore");
+            // Graceful shutdown: persist state first (when save points are configured),
+            // then release resources.
+            if (jediCore.context().saveOnShutdown() && jediCore.context().persistence() != null) {
+                try {
+                    jediCore.context().persistence().save();
+                    log.info("Final RDB save complete");
+                } catch (RuntimeException e) {
+                    log.warn("Final RDB save failed: {}", e.getMessage());
+                }
+            }
             jediCore.close();
         }, "jedicore-shutdown"));
 

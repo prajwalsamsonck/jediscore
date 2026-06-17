@@ -769,7 +769,41 @@ one place, feeds three command-thread-confined subsystems:
 server), `OBJECT` (reports `encoding`/`serializedlength` from the value), and a
 real `SET-ACTIVE-EXPIRE` toggle that gates the active-expiry cron.
 
+## Configuration &amp; lifecycle (Phase 7C)
+
+`ServerConfig` stays an immutable record, but `ServerContext` now holds it in a
+`volatile` field that `CONFIG SET` swaps: a `ServerConfig.Builder` rebuilds the
+record with one field changed, and components that read `config()` fresh (eviction,
+encoding decisions) pick up the change. `CONFIG` is driven by a parameter table
+mapping each name to a getter and an optional setter — config-backed scalars swap
+the config; subsystem params (`slowlog-*`, `latency-monitor-threshold`) call the
+`SlowLog`/`LatencyMonitor` setters directly. `GET` honours globs and returns a map;
+`REWRITE` writes the settable values back to the loaded file; `RESETSTAT` zeroes
+the `INFO stats` counters.
+
+**Startup config** is loaded by `BootConfig` from a redis.conf-style file and/or
+CLI `--option value` flags (`jediscore [config.conf] [host:port] [--opt …]`), CLI
+overriding the file. A small tokenizer handles quoted values; a curated directive
+set maps onto `ServerConfig`/`PersistenceConfig`.
+
+**Graceful shutdown.** The standalone server's SIGTERM hook does a final RDB save
+when save points are configured (`saveOnShutdown`, seeded from the config), then
+releases resources via `close()`. `SHUTDOWN [NOSAVE|SAVE]` adjusts the policy and
+exits — but only the standalone process; embedded/test instances persist and reply
+`+OK` without killing the JVM (a `standalone` flag gates `System.exit`). `close()`
+itself is pure teardown (cron, replica link, Netty groups, persistence/AOF,
+blocking + timeout schedulers, command executor) so tests stay isolated.
+
 ## Changelog
+
+### Phase 7C — Config &amp; lifecycle
+- **`ServerConfig.Builder`** + swappable `volatile` config on `ServerContext`;
+  `ConfigCommands` (`GET`/`SET`/`RESETSTAT`/`REWRITE`) over a parameter table.
+- **`BootConfig`**: redis.conf file + CLI `--opt` loading (CLI overrides file).
+- **Graceful shutdown**: SIGTERM hook final-saves; `SHUTDOWN` command with a
+  `standalone` guard so it never kills a test JVM; `saveOnShutdown` policy.
+- **Tests**: 8 CONFIG/SHUTDOWN integration tests + 4 `BootConfig` unit tests; plus
+  a manual real-`redis-cli` check (conf-file load, `CONFIG GET`/`SET`, globs).
 
 ### Phase 7B — Diagnostics (SLOWLOG, LATENCY, MONITOR, COMMAND, DEBUG)
 - **`SlowLog`/`LatencyMonitor`/`MonitorRegistry`** (engine), fed by per-command

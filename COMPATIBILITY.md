@@ -45,6 +45,11 @@ document, updated every phase as commands are implemented.
 | `LATENCY` | 🚧 Partial | `LATEST`/`HISTORY`/`RESET`/`DOCTOR` for the `command` event; off by default (`latency-monitor-threshold` 0). Other built-in event types (fork, expire-cycle, …) not tracked. |
 | `MONITOR` | ✅ Done | Streams every executed command in Redis's `<ts> [db addr] "CMD" "arg"…` format; `AUTH`/`HELLO`/`RESET` and the replication link are not echoed. |
 | `DEBUG` | 🚧 Partial | `RELOAD`, `SLEEP`, `OBJECT` (encoding/serializedlength), `SET-ACTIVE-EXPIRE` (real toggle), `JMAP`/`QUICKLIST-PACKED-THRESHOLD`/`STRINGMATCH-LEN` no-ops. |
+| `CONFIG GET`/`SET` | 🚧 Partial | A curated parameter set: maxmemory + policy + samples, requirepass, the listpack/intset encoding thresholds, `slowlog-*`, `latency-monitor-threshold` (settable); port/bind/databases/maxclients/appendonly/dir (read-only). `GET` honours globs and returns a map. Other params are unknown to `CONFIG`. |
+| `CONFIG RESETSTAT` | ✅ Done | Resets the `INFO stats` counters. |
+| `CONFIG REWRITE` | ✅ Done | Rewrites the loaded config file with current settable values; errors if started without a file. |
+| redis.conf + CLI | ✅ Done | `jediscore [config.conf] [host:port] [--opt value …]`; CLI overrides file directives. Curated directive set (port/bind/databases/maxmemory*/requirepass/encoding thresholds/dir/save/appendonly/appendfsync). |
+| `SHUTDOWN [NOSAVE\|SAVE]` | ✅ Done | Persists per the save-on-shutdown policy, then exits the standalone server; the SIGTERM hook does a final RDB save when save points are configured. |
 
 ### Generic key commands
 

@@ -14,7 +14,10 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class ServerContext {
 
-    private final ServerConfig config;
+    private volatile ServerConfig config;
+    private volatile String configFile;
+    private volatile boolean saveOnShutdown;
+    private volatile boolean standalone;
     private final CommandRegistry registry;
     private final CommandExecutor executor;
     private final AtomicLong clientIdSeq = new AtomicLong(0);
@@ -145,9 +148,63 @@ public final class ServerContext {
         watchTable.touchAll(b);
     }
 
-    /** @return the configuration */
+    /** @return the configuration (may be replaced at runtime by {@code CONFIG SET}) */
     public ServerConfig config() {
         return config;
+    }
+
+    /**
+     * Replaces the live configuration (via {@code CONFIG SET}). Components read
+     * {@code config()} fresh, so they pick up the change.
+     *
+     * @param config the new configuration
+     */
+    public void setConfig(ServerConfig config) {
+        this.config = config;
+    }
+
+    /** @return the path of the loaded config file, or {@code null} if none */
+    public String configFile() {
+        return configFile;
+    }
+
+    /**
+     * Records the config-file path (for {@code CONFIG REWRITE}).
+     *
+     * @param path the file path
+     */
+    public void setConfigFile(String path) {
+        this.configFile = path;
+    }
+
+    /** @return whether a final RDB save should run on shutdown */
+    public boolean saveOnShutdown() {
+        return saveOnShutdown;
+    }
+
+    /**
+     * Sets whether to persist on shutdown (seeded from the save points; toggled by
+     * {@code SHUTDOWN SAVE|NOSAVE}).
+     *
+     * @param save the new value
+     */
+    public void setSaveOnShutdown(boolean save) {
+        this.saveOnShutdown = save;
+    }
+
+    /** @return whether this is the standalone server process (vs an embedded/test instance) */
+    public boolean isStandalone() {
+        return standalone;
+    }
+
+    /**
+     * Marks this as the standalone server process, so {@code SHUTDOWN} may exit the
+     * JVM (embedded/test instances never do).
+     *
+     * @param standalone the flag
+     */
+    public void setStandalone(boolean standalone) {
+        this.standalone = standalone;
     }
 
     /** @return the command registry */

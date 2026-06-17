@@ -147,6 +147,11 @@ public final class RdbPersistence implements Persistence {
     }
 
     @Override
+    public String dir() {
+        return config.dir();
+    }
+
+    @Override
     public void feedAppendOnly(int database, byte[][] args) {
         aof.feed(database, args);
     }

@@ -138,4 +138,83 @@ public record ServerConfig(
     public boolean requiresAuth() {
         return requirepass.isPresent();
     }
+
+    /** @return a mutable builder seeded from this configuration (for {@code CONFIG SET}) */
+    public Builder toBuilder() {
+        return new Builder(this);
+    }
+
+    /**
+     * A mutable builder for {@link ServerConfig}, so runtime {@code CONFIG SET}
+     * can produce an updated immutable config by changing one field at a time.
+     */
+    public static final class Builder {
+        private String host;
+        private int port;
+        private int backlog;
+        private Optional<String> requirepass;
+        private String version;
+        private String runId;
+        private int databases;
+        private int hashMaxListpackEntries;
+        private int hashMaxListpackValue;
+        private int listMaxListpackSize;
+        private int listMaxListpackValue;
+        private int setMaxIntsetEntries;
+        private int setMaxListpackEntries;
+        private int setMaxListpackValue;
+        private int zsetMaxListpackEntries;
+        private int zsetMaxListpackValue;
+        private long maxMemory;
+        private MaxmemoryPolicy maxMemoryPolicy;
+        private int maxMemorySamples;
+
+        private Builder(ServerConfig c) {
+            this.host = c.host;
+            this.port = c.port;
+            this.backlog = c.backlog;
+            this.requirepass = c.requirepass;
+            this.version = c.version;
+            this.runId = c.runId;
+            this.databases = c.databases;
+            this.hashMaxListpackEntries = c.hashMaxListpackEntries;
+            this.hashMaxListpackValue = c.hashMaxListpackValue;
+            this.listMaxListpackSize = c.listMaxListpackSize;
+            this.listMaxListpackValue = c.listMaxListpackValue;
+            this.setMaxIntsetEntries = c.setMaxIntsetEntries;
+            this.setMaxListpackEntries = c.setMaxListpackEntries;
+            this.setMaxListpackValue = c.setMaxListpackValue;
+            this.zsetMaxListpackEntries = c.zsetMaxListpackEntries;
+            this.zsetMaxListpackValue = c.zsetMaxListpackValue;
+            this.maxMemory = c.maxMemory;
+            this.maxMemoryPolicy = c.maxMemoryPolicy;
+            this.maxMemorySamples = c.maxMemorySamples;
+        }
+
+        public Builder host(String v) { this.host = v; return this; }
+        public Builder port(int v) { this.port = v; return this; }
+        public Builder backlog(int v) { this.backlog = v; return this; }
+        public Builder requirepass(Optional<String> v) { this.requirepass = v; return this; }
+        public Builder databases(int v) { this.databases = v; return this; }
+        public Builder hashMaxListpackEntries(int v) { this.hashMaxListpackEntries = v; return this; }
+        public Builder hashMaxListpackValue(int v) { this.hashMaxListpackValue = v; return this; }
+        public Builder listMaxListpackSize(int v) { this.listMaxListpackSize = v; return this; }
+        public Builder listMaxListpackValue(int v) { this.listMaxListpackValue = v; return this; }
+        public Builder setMaxIntsetEntries(int v) { this.setMaxIntsetEntries = v; return this; }
+        public Builder setMaxListpackEntries(int v) { this.setMaxListpackEntries = v; return this; }
+        public Builder setMaxListpackValue(int v) { this.setMaxListpackValue = v; return this; }
+        public Builder zsetMaxListpackEntries(int v) { this.zsetMaxListpackEntries = v; return this; }
+        public Builder zsetMaxListpackValue(int v) { this.zsetMaxListpackValue = v; return this; }
+        public Builder maxMemory(long v) { this.maxMemory = v; return this; }
+        public Builder maxMemoryPolicy(MaxmemoryPolicy v) { this.maxMemoryPolicy = v; return this; }
+        public Builder maxMemorySamples(int v) { this.maxMemorySamples = v; return this; }
+
+        /** @return the immutable configuration */
+        public ServerConfig build() {
+            return new ServerConfig(host, port, backlog, requirepass, version, runId, databases,
+                    hashMaxListpackEntries, hashMaxListpackValue, listMaxListpackSize, listMaxListpackValue,
+                    setMaxIntsetEntries, setMaxListpackEntries, setMaxListpackValue,
+                    zsetMaxListpackEntries, zsetMaxListpackValue, maxMemory, maxMemoryPolicy, maxMemorySamples);
+        }
+    }
 }

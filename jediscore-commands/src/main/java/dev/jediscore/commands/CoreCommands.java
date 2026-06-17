@@ -52,5 +52,6 @@ public final class CoreCommands {
         ReplicationCommands.registerAll(registry);
         ServerCommands.registerAll(registry);
         DiagnosticsCommands.registerAll(registry);
+        ConfigCommands.registerAll(registry);
     }
 }

@@ -78,6 +78,8 @@ public final class JediCore implements AutoCloseable {
 
         // Wire the replica-side link so REPLICAOF can replicate from a master.
         context.setMasterLink(new ReplicaLink(context));
+        // Persist on shutdown when save points are configured (Redis's default).
+        context.setSaveOnShutdown(!persistenceConfig.savePoints().isEmpty());
 
         RespServer server = new RespServer(context);
         int boundPort = server.start();
