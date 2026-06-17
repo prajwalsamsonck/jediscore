@@ -1,0 +1,51 @@
+# JediCore demo: a master, two replicas, and a load generator that writes to the
+# master and then verifies the replicas have converged.
+#
+#   docker compose up --build
+#
+# protected-mode is turned off because clients/replicas reach the servers over the
+# (non-loopback) compose network.
+
+services:
+  master:
+    build: .
+    image: jedicore:demo
+    command: ["0.0.0.0:6379", "--protected-mode", "no", "--metrics-port", "9121"]
+    ports:
+      - "6379:6379"     # client port
+      - "9121:9121"     # Prometheus /metrics
+
+  replica1:
+    image: jedicore:demo
+    command: ["0.0.0.0:6379", "--protected-mode", "no", "--replicaof", "master", "6379"]
+    depends_on: [master]
+    ports:
+      - "6380:6379"
+
+  replica2:
+    image: jedicore:demo
+    command: ["0.0.0.0:6379", "--protected-mode", "no", "--replicaof", "master", "6379"]
+    depends_on: [master]
+    ports:
+      - "6381:6379"
+
+  loadgen:
+    image: redis:7.4
+    depends_on: [master, replica1, replica2]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "Waiting for the cluster to come up..."; sleep 10
+        echo "=== Driving load against the master ==="
+        redis-benchmark -h master -p 6379 -n 100000 -c 50 -P 8 -t set,get,incr -q
+        echo "=== master DBSIZE ==="; redis-cli -h master -p 6379 dbsize
+        sleep 2
+        echo "=== replica1: role + keyspace convergence ==="
+        redis-cli -h replica1 -p 6379 role | head -1
+        redis-cli -h replica1 -p 6379 dbsize
+        echo "=== replica2: role + keyspace convergence ==="
+        redis-cli -h replica2 -p 6379 role | head -1
+        redis-cli -h replica2 -p 6379 dbsize
+        echo "=== master INFO replication ==="
+        redis-cli -h master -p 6379 info replication | grep -E "role|connected_slaves|slave[0-9]"
+        echo "Demo complete."

@@ -64,6 +64,12 @@ public final class JediCoreServer {
         if (boot.tls().enabled()) {
             log.info("  TLS          = enabled ({})", boot.tls().hasCertificate() ? "cert files" : "self-signed");
         }
+        if (boot.replicaOf() != null) {
+            int masterPort = Integer.parseInt(boot.replicaOf()[1]);
+            jediCore.context().replication().becomeReplica(boot.replicaOf()[0], masterPort);
+            jediCore.context().masterLink().connect(boot.replicaOf()[0], masterPort);
+            log.info("  replicaof    = {}:{}", boot.replicaOf()[0], masterPort);
+        }
         log.info("Ready to accept connections tcp on {}:{}", config.host(), jediCore.port());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

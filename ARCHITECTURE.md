@@ -78,6 +78,36 @@ single-writer loop buys correctness, predictable tail latency, and a vastly simp
 mental model — and Redis itself proves single-threaded execution is enough to be fast.
 We keep the door open to sharding without paying its complexity prematurely.
 
+```mermaid
+flowchart LR
+    subgraph io["Netty I/O threads (N)"]
+        dec["RESP decode/encode"]
+    end
+    subgraph cmd["Command thread (1)"]
+        disp["dispatch → execute"]
+        ks["keyspace + registries\n(pubsub, watch, blocking,\nreplication, ACL, stats,\nslowlog, latency, monitor)"]
+        disp --> ks
+    end
+    subgraph bg["Daemon threads"]
+        cron["ServerCron (100ms)"]
+        bto["blocking timeouts"]
+        rdb["bgsave / AOF writer"]
+        link["replica link"]
+        sched["timeouts"]
+    end
+    client["clients"] -->|sockets| dec
+    dec -->|submit request| disp
+    disp -->|writeAndFlush reply / push| dec
+    cron -->|submit cycle| disp
+    bto -->|submit timeout| disp
+    link -->|submit applied cmd| disp
+    ks -.snapshot.-> rdb
+```
+
+Every box that touches the keyspace funnels through the one command thread; the
+daemon threads only *submit* work to it (or do off-thread I/O on an immutable
+snapshot). That is the single invariant the whole engine rests on.
+
 ### The fork() problem (persistence, Phase 5 — flagged early, honestly)
 
 Real Redis snapshots by calling `fork()`, getting a copy-on-write view of memory for

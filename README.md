@@ -8,20 +8,19 @@ It is built as a serious systems-programming exercise: clean module boundaries, 
 explicit and defended concurrency model, allocation-aware hot paths, and a test +
 benchmark discipline that runs in CI.
 
-> **Status:** Phase 7 in progress — **7A** full `INFO` + live stats, **7B**
-> diagnostics (`SLOWLOG`/`LATENCY`/`MONITOR`/`COMMAND GETKEYS`/`DEBUG`), **7C**
-> config & lifecycle (`CONFIG`, redis.conf + CLI, graceful shutdown), **7D**
-> security (ACL + AUTH, maxclients, protected-mode, rename-command), **7E** TLS +
-> Prometheus metrics + structured logging. On top of **Phase 6** master/replica
-> replication, both directions
-> verified against real Redis 7.4: full **and partial** resync (`PSYNC`
-> `FULLRESYNC`/`CONTINUE` with a backlog ring), deterministic command rewriting
-> (`EXPIRE`→`PEXPIREAT`, `SPOP`→`SREM`, `SETEX`/`INCRBYFLOAT`→`SET …`), `WAIT`,
-> `REPLICAOF`, read-only replicas, diskless `$EOF:` RDB, and `INFO`/`ROLE`. Manual
-> failover via `REPLICAOF NO ONE` (Sentinel design documented). On top of Phase 5
-> **advanced semantics** (Lua, blocking, transactions, Pub/Sub), **AOF + RDB
-> persistence**, all five data types, `SCAN`, expiration, memory accounting, and
-> eviction. Next: streams / cluster.
+> **Status:** Phase 7 complete — **production-operable**: full `INFO` + live stats,
+> `CONFIG`/redis.conf/CLI, `SLOWLOG`/`LATENCY`/`MONITOR`/`COMMAND`/`DEBUG`, ACL + AUTH,
+> maxclients/protected-mode/rename-command, **TLS**, **Prometheus metrics**, structured
+> logging, graceful shutdown. Shipped with a [docker-compose demo](docker-compose.yml)
+> (master + 2 replicas + load generator), [CI](.github/workflows/ci.yml) (build/test +
+> JMH smoke + redis-cli compatibility), [BENCHMARKS.md](BENCHMARKS.md) (vs real Redis
+> 7.4, honest gap), and a full [compatibility matrix](COMPATIBILITY.md).
+>
+> The whole stack: RESP2/3, all five data types with encodings, `SCAN`, two-tier
+> expiration, memory accounting + `maxmemory` eviction, RDB + multi-part AOF, Pub/Sub,
+> transactions, blocking commands, Lua scripting, and master/replica replication
+> (full + partial resync, both directions verified against real Redis 7.4). Not
+> implemented: Streams, Cluster, Bitmaps/HLL/Geo, Functions, Sentinel auto-failover.
 > See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 ```text

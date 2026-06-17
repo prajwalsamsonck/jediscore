@@ -30,10 +30,11 @@ import java.util.Optional;
  * @param renameCommands {@code rename-command} directives ({@code from → to}, empty = disable)
  * @param tls            the TLS configuration
  * @param metricsPort    the Prometheus metrics HTTP port ({@code 0} = disabled)
+ * @param replicaOf      {@code [host, port]} to replicate from at startup, or {@code null}
  */
 public record BootConfig(ServerConfig server, PersistenceConfig persistence, String configFile,
                          int maxClients, boolean protectedMode, Map<String, String> renameCommands,
-                         TlsConfig tls, int metricsPort) {
+                         TlsConfig tls, int metricsPort, String[] replicaOf) {
 
     /**
      * Loads configuration from the command-line arguments.
@@ -188,7 +189,13 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
                 params.containsKey("tls-cert-file") ? first(params, "tls-cert-file", null) : null,
                 params.containsKey("tls-key-file") ? first(params, "tls-key-file", null) : null);
         int metricsPort = Integer.parseInt(first(params, "metrics-port", "0"));
-        return new BootConfig(serverConfig, pc, configFile, maxClients, protectedMode, renames, tls, metricsPort);
+        String[] replicaOf = null;
+        List<String> ro = params.containsKey("replicaof") ? params.get("replicaof") : params.get("slaveof");
+        if (ro != null && ro.size() == 2 && !ro.get(0).equalsIgnoreCase("no")) {
+            replicaOf = new String[]{ro.get(0), ro.get(1)};
+        }
+        return new BootConfig(serverConfig, pc, configFile, maxClients, protectedMode, renames,
+                tls, metricsPort, replicaOf);
     }
 
     private static List<SavePoint> parseSavePoints(List<String> values) {

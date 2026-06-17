@@ -46,3 +46,50 @@ jobs:
             **/build/reports/
             **/build/results/jmh/
           if-no-files-found: ignore
+
+  redis-cli-compat:
+    name: redis-cli compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Install redis-tools (official redis-cli)
+        run: sudo apt-get update && sudo apt-get install -y redis-tools
+      - name: Build runnable image
+        run: ./gradlew :jediscore-server:installDist --no-daemon
+      - name: Start JediCore and wait for readiness
+        run: |
+          nohup java -cp 'jediscore-server/build/install/jediscore/lib/*' \
+            dev.jediscore.server.JediCoreServer 127.0.0.1:6379 > jedicore.log 2>&1 &
+          for i in $(seq 1 30); do
+            if redis-cli -p 6379 ping 2>/dev/null | grep -q PONG; then break; fi
+            sleep 0.5
+          done
+      - name: Run the redis-cli compatibility suite
+        run: |
+          set -e
+          assert() { if [ "$1" != "$2" ]; then echo "FAIL $3: got '$1' want '$2'"; exit 1; fi; echo "ok: $3"; }
+          R() { redis-cli -p 6379 "$@"; }
+          assert "$(R ping)" "PONG" PING
+          assert "$(R set k v)" "OK" SET
+          assert "$(R get k)" "v" GET
+          assert "$(R incr n)" "1" INCR
+          assert "$(R rpush l a b c)" "3" RPUSH
+          assert "$(R lrange l 0 -1 | tr '\n' ',')" "a,b,c," LRANGE
+          assert "$(R sadd s a b c)" "3" SADD
+          assert "$(R hset h f1 v1)" "1" HSET
+          assert "$(R zadd z 1 one)" "1" ZADD
+          assert "$(R object encoding l)" "listpack" OBJECT_ENCODING
+          assert "$(R eval 'return redis.call("incr", KEYS[1])' 1 n)" "2" EVAL
+          assert "$(R info server | grep -c redis_version)" "1" INFO
+          echo "redis-cli compatibility suite passed."
+      - name: Server log on failure
+        if: failure()
+        run: cat jedicore.log

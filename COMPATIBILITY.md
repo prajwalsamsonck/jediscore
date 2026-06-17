@@ -3,6 +3,30 @@
 This document tracks JediCore's command-level compatibility with Redis. It is a living
 document, updated every phase as commands are implemented.
 
+## Coverage at a glance
+
+JediCore targets **wire compatibility with Redis 7.4** (RESP2 and RESP3) and is
+verified continuously by a property-based **differential test** against a real
+Redis and a **redis-cli compatibility suite** in CI.
+
+- **Data types** — Strings, Hashes, Lists, Sets, Sorted Sets: complete, with
+  Redis's listpack/intset/quicklist/skiplist encoding transitions.
+- **Keyspace** — generic key commands, the full `SCAN` family, two-tier expiration,
+  `maxmemory` + all 8 eviction policies, `SWAPDB`/`MOVE`/`COPY`.
+- **Persistence** — RDB (cross-compatible both ways) and multi-part AOF with all
+  three `appendfsync` policies and `BGREWRITEAOF`.
+- **Advanced semantics** — Pub/Sub (+ sharded + RESP3 push), transactions
+  (MULTI/EXEC/WATCH), blocking commands, and Lua scripting (EVAL/EVALSHA/SCRIPT).
+- **Replication** — master and replica, full + partial resync, verified both ways
+  against real Redis.
+- **Operations** — full `INFO`, `CONFIG`, `SLOWLOG`/`LATENCY`/`MONITOR`,
+  `COMMAND`/`DEBUG`, ACL + AUTH, TLS, Prometheus metrics, graceful shutdown.
+
+**Not implemented (honestly):** Streams (`X*`), Cluster (hash slots / `MOVED`/`ASK`),
+Bitmaps/HyperLogLog/Geo, Redis Functions (`FUNCTION`/`FCALL`), Sentinel automatic
+failover (a design is documented; manual failover via `REPLICAOF NO ONE` works), and
+ACL key/channel-pattern *enforcement* (patterns are parsed and reported only).
+
 ## Legend
 
 | Status | Meaning |
