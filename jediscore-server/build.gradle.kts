@@ -25,6 +25,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     // jqwik powers the property-based differential test against real Redis.
     testImplementation(libs.jqwik)
+    // Test-only: enables Netty's self-signed certificate generation on JDK 17+ for
+    // the TLS integration test (production TLS uses real cert/key files).
+    testImplementation(libs.bouncycastle.pkix)
 }
 
 application {

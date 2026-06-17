@@ -2,6 +2,7 @@ package dev.jediscore.network;
 
 import dev.jediscore.engine.CommandDispatcher;
 import dev.jediscore.engine.ServerContext;
+import dev.jediscore.engine.TlsConfig;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -34,6 +35,8 @@ public final class RespServer implements AutoCloseable {
 
     private final ServerContext context;
     private final CommandDispatcher dispatcher;
+    private final TlsConfig tls;
+    private io.netty.handler.ssl.SslContext sslContext;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
@@ -46,7 +49,18 @@ public final class RespServer implements AutoCloseable {
      * @param context the shared server context (config, registry, executor)
      */
     public RespServer(ServerContext context) {
+        this(context, TlsConfig.disabled());
+    }
+
+    /**
+     * Creates a server with explicit TLS settings.
+     *
+     * @param context the shared server context
+     * @param tls     the TLS configuration
+     */
+    public RespServer(ServerContext context, TlsConfig tls) {
         this.context = context;
+        this.tls = tls;
         this.dispatcher = new CommandDispatcher(context);
         // Publish the dispatcher so EXEC can replay queued commands through it.
         context.setDispatcher(dispatcher);
@@ -59,6 +73,9 @@ public final class RespServer implements AutoCloseable {
      * @throws InterruptedException if interrupted while binding
      */
     public int start() throws InterruptedException {
+        if (tls.enabled()) {
+            sslContext = buildSslContext();
+        }
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("jedicore-boss"));
         workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("jedicore-io"));
 
@@ -72,6 +89,9 @@ public final class RespServer implements AutoCloseable {
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
+                        if (sslContext != null) {
+                            ch.pipeline().addLast("ssl", sslContext.newHandler(ch.alloc()));
+                        }
                         ch.pipeline()
                                 .addLast("decoder", new RespRequestDecoder())
                                 .addLast("encoder", new RespResponseEncoder())
@@ -86,6 +106,23 @@ public final class RespServer implements AutoCloseable {
         boundPort = ((InetSocketAddress) serverChannel.localAddress()).getPort();
         log.info("Listening on {}:{}", context.config().host(), boundPort);
         return boundPort;
+    }
+
+    private io.netty.handler.ssl.SslContext buildSslContext() {
+        try {
+            if (tls.hasCertificate()) {
+                return io.netty.handler.ssl.SslContextBuilder
+                        .forServer(new java.io.File(tls.certPath()), new java.io.File(tls.keyPath()))
+                        .build();
+            }
+            // Development fallback: a self-signed certificate.
+            var ssc = new io.netty.handler.ssl.util.SelfSignedCertificate();
+            log.warn("TLS enabled with a self-signed certificate (development only)");
+            return io.netty.handler.ssl.SslContextBuilder
+                    .forServer(ssc.certificate(), ssc.privateKey()).build();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to initialise TLS: " + e.getMessage(), e);
+        }
     }
 
     /** @return the bound port, or {@code -1} if not started */

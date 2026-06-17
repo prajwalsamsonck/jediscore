@@ -47,12 +47,22 @@ public final class JediCoreServer {
         log.info("  config_file  = {}", boot.configFile() == null ? "(none)" : boot.configFile());
         log.info("  dir          = {}  appendonly = {}", persistenceConfig.dir(), persistenceConfig.appendOnly());
 
-        JediCore jediCore = JediCore.start(config, persistenceConfig, boot.renameCommands());
+        JediCore jediCore = JediCore.start(config, persistenceConfig, boot.renameCommands(), boot.tls());
         jediCore.context().setStandalone(true);
         jediCore.context().setMaxClients(boot.maxClients());
         jediCore.context().setProtectedMode(boot.protectedMode());
         if (boot.configFile() != null) {
             jediCore.context().setConfigFile(boot.configFile());
+        }
+        if (boot.metricsPort() > 0) {
+            try {
+                jediCore.enableMetrics(boot.metricsPort());
+            } catch (java.io.IOException e) {
+                log.warn("Could not start metrics endpoint on port {}: {}", boot.metricsPort(), e.getMessage());
+            }
+        }
+        if (boot.tls().enabled()) {
+            log.info("  TLS          = enabled ({})", boot.tls().hasCertificate() ? "cert files" : "self-signed");
         }
         log.info("Ready to accept connections tcp on {}:{}", config.host(), jediCore.port());
 

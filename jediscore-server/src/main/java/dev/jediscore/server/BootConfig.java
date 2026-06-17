@@ -5,6 +5,7 @@ import dev.jediscore.engine.MaxmemoryPolicy;
 import dev.jediscore.engine.PersistenceConfig;
 import dev.jediscore.engine.SavePoint;
 import dev.jediscore.engine.ServerConfig;
+import dev.jediscore.engine.TlsConfig;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -27,9 +28,12 @@ import java.util.Optional;
  * @param maxClients     the maximum concurrent clients
  * @param protectedMode  whether protected mode is enabled
  * @param renameCommands {@code rename-command} directives ({@code from → to}, empty = disable)
+ * @param tls            the TLS configuration
+ * @param metricsPort    the Prometheus metrics HTTP port ({@code 0} = disabled)
  */
 public record BootConfig(ServerConfig server, PersistenceConfig persistence, String configFile,
-                         int maxClients, boolean protectedMode, Map<String, String> renameCommands) {
+                         int maxClients, boolean protectedMode, Map<String, String> renameCommands,
+                         TlsConfig tls, int metricsPort) {
 
     /**
      * Loads configuration from the command-line arguments.
@@ -179,7 +183,12 @@ public record BootConfig(ServerConfig server, PersistenceConfig persistence, Str
         }
         int maxClients = Integer.parseInt(first(params, "maxclients", "10000"));
         boolean protectedMode = !"no".equalsIgnoreCase(first(params, "protected-mode", "yes"));
-        return new BootConfig(serverConfig, pc, configFile, maxClients, protectedMode, renames);
+        TlsConfig tls = new TlsConfig(
+                "yes".equalsIgnoreCase(first(params, "tls", "no")),
+                params.containsKey("tls-cert-file") ? first(params, "tls-cert-file", null) : null,
+                params.containsKey("tls-key-file") ? first(params, "tls-key-file", null) : null);
+        int metricsPort = Integer.parseInt(first(params, "metrics-port", "0"));
+        return new BootConfig(serverConfig, pc, configFile, maxClients, protectedMode, renames, tls, metricsPort);
     }
 
     private static List<SavePoint> parseSavePoints(List<String> values) {

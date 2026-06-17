@@ -824,7 +824,40 @@ enforced at the dispatcher; selectors are unsupported.
 - **Input limits** — the parser caps multibulk at 1M elements and bulk strings at
   512 MB (`proto-max-bulk-len`).
 
+## TLS, metrics &amp; logging (Phase 7E)
+
+**TLS.** When `tls yes`, `RespServer` builds a Netty `SslContext` at start —
+from `tls-cert-file`/`tls-key-file` (PEM) in production, or a self-signed
+certificate for development — and prepends an SSL handler to each channel's
+pipeline, before the RESP decoder. Everything downstream (codec, command handler)
+is unchanged: TLS is purely a pipeline concern. The self-signed path needs
+BouncyCastle on the classpath (test-only here; not a runtime dependency, so it
+stays within the lean-dependency budget).
+
+**Metrics.** `MetricsExporter` builds a Micrometer `PrometheusMeterRegistry`,
+binds `jedicore_*` meters to `ServerStats` and the live registries
+(`FunctionCounter`s for the cumulative counters, `Gauge`s for clients/memory/keys/
+replicas) plus the JVM memory/CPU binders, and serves the Prometheus exposition
+text over a small `com.sun.net.httpserver` endpoint at `GET /metrics` on the
+configured `metrics-port`. The meters read the same counters `INFO` does, so the
+two never disagree.
+
+**Logging.** Logback (bound only in the runnable module) emits a structured,
+parseable line — ISO-8601 timestamp, level, thread, logger, MDC, message — and
+quietens Netty's internal logger; JSON output is a documented opt-in.
+
 ## Changelog
+
+### Phase 7E — TLS, metrics &amp; structured logging
+- **TLS**: `TlsConfig` + `RespServer` SSL handler (cert/key files or self-signed);
+  threaded through `JediCore.start` and `BootConfig` (`tls`/`tls-cert-file`/
+  `tls-key-file`).
+- **Metrics**: `MetricsExporter` (Micrometer + Prometheus `/metrics`), wired via
+  `JediCore.enableMetrics` and `BootConfig` `metrics-port`.
+- **Logging**: structured Logback pattern.
+- **Tests**: a real TLS handshake + PING test (self-signed via BouncyCastle,
+  test-only) and a Prometheus `/metrics` endpoint test asserting `jedicore_*` and
+  JVM meters.
 
 ### Phase 7D — Security (ACL, auth, hardening)
 - **`AclUser`/`AclRegistry`** (engine): users, SHA-256 passwords, command/category

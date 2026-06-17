@@ -38,7 +38,9 @@ document, updated every phase as commands are implemented.
 | `protected-mode` | ✅ Done | On by default: a non-loopback client cannot run commands when no password is set (`DENIED …`). Internal replay/master-link connections are exempt. |
 | `rename-command` | ✅ Done | Rename or disable (rename to `""`) commands via the config file / CLI. |
 | Input size limits | ✅ Done | Multibulk capped at 1M elements; bulk strings at 512 MB (`proto-max-bulk-len`), enforced in the parser. |
-| TLS | 📋 Phase 7D-cont | Not yet implemented. |
+| TLS | ✅ Done | `tls yes` fronts the listening port with a Netty SSL handler from `tls-cert-file`/`tls-key-file` (PEM), or a self-signed cert for dev (needs BouncyCastle on the classpath; not bundled). Verified with a real TLS handshake + PING. Single-port (not a separate `tls-port`). |
+| Metrics (Prometheus) | ✅ Done | `metrics-port N` starts an HTTP `/metrics` endpoint with Micrometer: `jedicore_*` counters/gauges (commands, connections, keyspace hits/misses, expired/evicted, clients, memory, keys, replicas) plus JVM memory/CPU binders. |
+| Structured logging | 🚧 Partial | Logback with an ISO-8601, level/thread/logger/MDC pattern; JSON output is a documented opt-in (Logstash encoder), not bundled. |
 | `QUIT` | ✅ Done | Replies `+OK`, then closes after flush. |
 | `RESET` | ✅ Done | Resets protocol/name/auth and drops all pub/sub subscriptions; transaction state reset when that lands. |
 | `CLIENT ID` | ✅ Done | |

@@ -1,14 +1,23 @@
 <!--
   Runtime logging configuration for the JediCore server application.
-  A single console appender with a compact, low-overhead pattern. Logback is
-  bound only in this runnable module, never in the engine libraries.
+
+  The pattern emits structured, parseable fields: ISO-8601 timestamp, level,
+  thread, logger, and message (plus the MDC if set). Logback is bound only in
+  this runnable module, never in the engine libraries.
+
+  For JSON logs (e.g. for a log pipeline), swap the pattern encoder for the
+  Logstash `LogstashEncoder` — kept out of the default to preserve the
+  zero-extra-dependency footprint.
 -->
 <configuration>
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{36}%replace(%mdc){'^(.+)$', ' {$1}'} - %msg%n</pattern>
         </encoder>
     </appender>
+
+    <!-- Quieten Netty's internal noise; raise to DEBUG when diagnosing I/O. -->
+    <logger name="io.netty" level="WARN"/>
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>

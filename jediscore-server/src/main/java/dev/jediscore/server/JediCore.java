@@ -30,6 +30,7 @@ public final class JediCore implements AutoCloseable {
     private final ServerCron cron;
     private final Persistence persistence;
     private final int port;
+    private MetricsExporter metrics;
 
     private JediCore(ServerContext context, RespServer server, CommandExecutor executor,
                      ServerCron cron, Persistence persistence, int port) {
@@ -77,6 +78,22 @@ public final class JediCore implements AutoCloseable {
      */
     public static JediCore start(ServerConfig config, PersistenceConfig persistenceConfig,
                                  java.util.Map<String, String> renameCommands) throws InterruptedException {
+        return start(config, persistenceConfig, renameCommands, dev.jediscore.engine.TlsConfig.disabled());
+    }
+
+    /**
+     * Builds and starts a server with rename directives and TLS settings.
+     *
+     * @param config            the server configuration
+     * @param persistenceConfig the persistence configuration
+     * @param renameCommands    {@code from → to} renames (empty {@code to} disables)
+     * @param tls               the TLS configuration
+     * @return a running server handle
+     * @throws InterruptedException if interrupted while binding the socket
+     */
+    public static JediCore start(ServerConfig config, PersistenceConfig persistenceConfig,
+                                 java.util.Map<String, String> renameCommands,
+                                 dev.jediscore.engine.TlsConfig tls) throws InterruptedException {
         CommandRegistry registry = new CommandRegistry();
         CoreCommands.registerAll(registry);
         renameCommands.forEach(registry::rename);
@@ -97,7 +114,7 @@ public final class JediCore implements AutoCloseable {
         // Persist on shutdown when save points are configured (Redis's default).
         context.setSaveOnShutdown(!persistenceConfig.savePoints().isEmpty());
 
-        RespServer server = new RespServer(context);
+        RespServer server = new RespServer(context, tls);
         int boundPort = server.start();
 
         // Start background maintenance (active expiration, save-point checks).
@@ -105,6 +122,23 @@ public final class JediCore implements AutoCloseable {
         cron.start();
 
         return new JediCore(context, server, executor, cron, persistence, boundPort);
+    }
+
+    /**
+     * Starts the Prometheus metrics endpoint.
+     *
+     * @param metricsPort the HTTP port ({@code 0} picks an ephemeral port)
+     * @return the actually-bound metrics port
+     * @throws java.io.IOException if the endpoint cannot bind
+     */
+    public int enableMetrics(int metricsPort) throws java.io.IOException {
+        this.metrics = new MetricsExporter(context);
+        return metrics.start(metricsPort);
+    }
+
+    /** @return the metrics exporter, or {@code null} if metrics are not enabled */
+    public MetricsExporter metrics() {
+        return metrics;
     }
 
     /** @return the bound TCP port */
@@ -131,6 +165,9 @@ public final class JediCore implements AutoCloseable {
     @Override
     public void close() {
         cron.close();
+        if (metrics != null) {
+            metrics.close();
+        }
         if (context.masterLink() != null) {
             context.masterLink().disconnect();
         }

@@ -18,6 +18,9 @@ jqwik = "1.9.1"
 # Embedded Lua for EVAL/EVALSHA (the one sanctioned runtime dep beyond the core
 # four: see Phase 5D — the spec calls for LuaJ specifically).
 luaj = "3.0.1"
+# Test-only: lets Netty generate a self-signed cert for the TLS integration test
+# on JDK 17+ (not a runtime dependency — production TLS uses real cert/key files).
+bouncycastle = "1.78.1"
 
 # Plugin versions
 jmhPlugin = "0.7.3"
@@ -49,6 +52,8 @@ testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.re
 jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 
 luaj-jse = { module = "org.luaj:luaj-jse", version.ref = "luaj" }
+
+bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 
 [bundles]
 netty = ["netty-buffer", "netty-transport", "netty-codec", "netty-handler"]
