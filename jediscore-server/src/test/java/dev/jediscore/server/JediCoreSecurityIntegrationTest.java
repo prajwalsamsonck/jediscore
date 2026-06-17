@@ -93,6 +93,25 @@ class JediCoreSecurityIntegrationTest {
     }
 
     @Test
+    void keyPatternsAreEnforced() throws Exception {
+        try (RespTestClient c = client()) {
+            // Full command rights, but keys restricted to the app:* prefix.
+            c.call("ACL", "SETUSER", "scoped", "on", ">pw", "+@all", "~app:*");
+            try (RespTestClient scoped = client()) {
+                scoped.call("AUTH", "scoped", "pw");
+                assertThat(scoped.call("SET", "app:1", "v")).isEqualTo(RespValue.OK);       // in-pattern
+                assertThat(scoped.call("GET", "app:1")).isInstanceOf(RespValue.BulkString.class);
+                RespValue denied = scoped.call("GET", "other:1");                            // out of pattern
+                assertThat(denied).isInstanceOf(RespValue.SimpleError.class);
+                assertThat(((RespValue.SimpleError) denied).message()).startsWith("NOPERM");
+                // A multi-key command is denied if any key is out of pattern.
+                assertThat(scoped.call("MSET", "app:2", "x", "other:2", "y"))
+                        .isInstanceOf(RespValue.SimpleError.class);
+            }
+        }
+    }
+
+    @Test
     void deluserAndDefaultProtected() throws Exception {
         try (RespTestClient c = client()) {
             c.call("ACL", "SETUSER", "temp", "on");

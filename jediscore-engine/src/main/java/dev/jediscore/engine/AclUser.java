@@ -100,6 +100,29 @@ public final class AclUser {
         return allowed;
     }
 
+    /** @return whether the user may access every key ({@code ~*}) */
+    public boolean allKeys() {
+        return allKeys;
+    }
+
+    /**
+     * Tests whether this user may access a key, by glob-matching its key patterns.
+     *
+     * @param key the key bytes
+     * @return {@code true} if permitted
+     */
+    public boolean canAccessKey(byte[] key) {
+        if (allKeys) {
+            return true;
+        }
+        for (String pattern : keyPatterns) {
+            if (dev.jediscore.datastructures.Glob.match(pattern.getBytes(StandardCharsets.UTF_8), key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean categoryContains(String category, String commandUpper) {
         return switch (category) {
             case "all" -> true;

@@ -252,6 +252,12 @@ public final class ReplicaLink implements MasterLink {
         link.markMasterLink();
         ByteBuf acc = Unpooled.buffer(8192);
         long offset = startOffset;
+        // A read timeout turns idle periods into a heartbeat: we ACK ~every second
+        // so the master's view of our offset (and WAIT) stays current.
+        Socket sock = socket;
+        if (sock != null) {
+            sock.setSoTimeout(1000);
+        }
         try {
             byte[] chunk = new byte[8192];
             while (epoch.get() == myEpoch) {
@@ -266,7 +272,13 @@ public final class ReplicaLink implements MasterLink {
                 int before = acc.readerIndex();
                 RespValue value = RespParser.parse(acc);
                 if (value == null) {
-                    int n = in.read(chunk);
+                    int n;
+                    try {
+                        n = in.read(chunk);
+                    } catch (java.net.SocketTimeoutException idle) {
+                        sendAck(out, offset); // periodic heartbeat ACK
+                        continue;
+                    }
                     if (n == -1) {
                         throw new IOException("master closed the stream");
                     }

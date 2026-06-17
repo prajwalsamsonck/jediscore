@@ -25,7 +25,8 @@ Redis and a **redis-cli compatibility suite** in CI.
 **Not implemented (honestly):** Streams (`X*`), Cluster (hash slots / `MOVED`/`ASK`),
 Bitmaps/HyperLogLog/Geo, Redis Functions (`FUNCTION`/`FCALL`), Sentinel automatic
 failover (a design is documented; manual failover via `REPLICAOF NO ONE` works), and
-ACL key/channel-pattern *enforcement* (patterns are parsed and reported only).
+ACL *channel*-pattern enforcement (key patterns and selectors aside — key patterns
+*are* enforced; channel patterns are parsed/reported only).
 
 ## Legend
 
@@ -57,7 +58,7 @@ ACL key/channel-pattern *enforcement* (patterns are parsed and reported only).
 | `ECHO` | ✅ Done | |
 | `HELLO` | ✅ Done | Protocol negotiation (2/3), `AUTH`/`SETNAME` options, `NOPROTO` on bad version. |
 | `AUTH` | ✅ Done | `AUTH password` (default user) and `AUTH username password`; validates against the ACL (SHA-256 password hashes). |
-| `ACL` | 🚧 Partial | `WHOAMI`/`LIST`/`USERS`/`CAT`/`GETUSER`/`SETUSER`/`DELUSER`/`GENPASS`. Command rules and the `@read`/`@write`/`@admin`/`@all` categories are **enforced**; key/channel patterns are parsed, stored, and reported but **not yet enforced**; ACL selectors are not supported. |
+| `ACL` | 🚧 Partial | `WHOAMI`/`LIST`/`USERS`/`CAT`/`GETUSER`/`SETUSER`/`DELUSER`/`GENPASS`. Command rules, the `@read`/`@write`/`@admin`/`@all` categories, **and key patterns (`~pattern`/`allkeys`) are enforced** (a command is denied if any of its keys is out of pattern). Channel patterns are parsed/reported but not enforced; ACL selectors are not supported. |
 | `maxclients` | ✅ Done | New connections beyond the limit are rejected at accept with `-ERR max number of clients reached`; settable via `CONFIG`. |
 | `protected-mode` | ✅ Done | On by default: a non-loopback client cannot run commands when no password is set (`DENIED …`). Internal replay/master-link connections are exempt. |
 | `rename-command` | ✅ Done | Rename or disable (rename to `""`) commands via the config file / CLI. |

@@ -144,6 +144,31 @@ class JediCoreReplicationReplicaTest {
     }
 
     @Test
+    void periodicAckAdvancesTheMasterView() throws Exception {
+        try (RespTestClient m = masterClient(); RespTestClient r = replicaClient()) {
+            m.call("SET", "seed", "1");
+            replicaOfMaster(r);
+            awaitValue(r, "seed", "1");
+            m.call("SET", "more", "2"); // advances the master offset
+
+            long target = master.context().replication().masterReplOffset();
+            assertThat(target).isGreaterThan(0);
+            // The replica's periodic (heartbeat) ACK should advance the master's view
+            // of its offset WITHOUT any WAIT/GETACK being issued.
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            boolean caughtUp = false;
+            while (System.nanoTime() < deadline) {
+                if (master.context().replication().replicasAckedAtLeast(target) >= 1) {
+                    caughtUp = true;
+                    break;
+                }
+                Thread.sleep(100);
+            }
+            assertThat(caughtUp).isTrue();
+        }
+    }
+
+    @Test
     void roleAndInfoReportSlaveState() throws Exception {
         try (RespTestClient m = masterClient(); RespTestClient r = replicaClient()) {
             m.call("SET", "ping", "1");

@@ -103,15 +103,27 @@ public final class CommandDispatcher {
                     + "password (requirepass), or disable protected mode (protected-mode no).");
         }
 
-        // ACL: enforce the authenticated user's command permissions.
+        // ACL: enforce the authenticated user's command and key permissions.
         if (!NO_AUTH_COMMANDS.contains(upperName)) {
             AclUser user = server.acl().user(conn.user());
-            if (user != null && !user.canRun(upperName)) {
-                if (queueing) {
-                    conn.markTransactionError();
+            if (user != null) {
+                if (!user.canRun(upperName)) {
+                    if (queueing) {
+                        conn.markTransactionError();
+                    }
+                    return RespValue.error("NOPERM User " + conn.user()
+                            + " has no permissions to run the '" + spec.name() + "' command");
                 }
-                return RespValue.error("NOPERM User " + conn.user()
-                        + " has no permissions to run the '" + spec.name() + "' command");
+                if (!user.allKeys()) {
+                    for (byte[] key : CommandKeys.extractKeys(ctx.args())) {
+                        if (!user.canAccessKey(key)) {
+                            if (queueing) {
+                                conn.markTransactionError();
+                            }
+                            return RespValue.error("NOPERM No permissions to access a key");
+                        }
+                    }
+                }
             }
         }
 

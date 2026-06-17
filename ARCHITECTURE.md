@@ -878,6 +878,16 @@ quietens Netty's internal logger; JSON output is a documented opt-in.
 
 ## Changelog
 
+### Phase 7 polish — ACL key enforcement &amp; periodic replica ACKs
+- **ACL key patterns are now enforced.** Key-spec metadata moved to a shared engine
+  `CommandKeys` (used by both `COMMAND GETKEYS`/`INFO` and the dispatcher), and
+  `AclUser.canAccessKey` glob-matches every key a command touches; a command is
+  denied (`NOPERM`) if any key is outside the user's `~pattern`s. The default
+  `~*` user skips the check entirely, so the common path is unaffected.
+- **Replicas now ACK on a ~1 s heartbeat**, not only in response to `GETACK`: the
+  replica link sets a read timeout and sends `REPLCONF ACK <offset>` on idle, so
+  the master's view of replica progress (and `INFO`/`WAIT`) stays current.
+
 ### Phase 7E — TLS, metrics &amp; structured logging
 - **TLS**: `TlsConfig` + `RespServer` SSL handler (cert/key files or self-signed);
   threaded through `JediCore.start` and `BootConfig` (`tls`/`tls-cert-file`/
