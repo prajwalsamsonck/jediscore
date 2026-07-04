@@ -46,7 +46,7 @@ $ redis-cli -p 6379 HELLO 3
 # Build everything and run all unit tests
 ./gradlew build
 
-# Run the (Phase 0) server: prints a banner and exits cleanly
+# Run the server on the default Redis port
 ./gradlew :jediscore-server:run
 
 # Run the JMH benchmarks (fast smoke profile)
