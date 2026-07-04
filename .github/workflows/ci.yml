@@ -92,4 +92,4 @@ jobs:
           echo "redis-cli compatibility suite passed."
       - name: Server log on failure
         if: failure()
-        run: cat jedicore.log
+        run: test -f jedicore.log && cat jedicore.log || true
